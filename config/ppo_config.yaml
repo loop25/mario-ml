@@ -1,0 +1,92 @@
+# ============================================================================
+# PPO (Proximal Policy Optimization) Configuration
+# ============================================================================
+# PPO is a modern policy gradient RL algorithm that learns by:
+#   1. Collecting experience by running the current policy in the environment
+#   2. Computing advantages (how much better each action was than expected)
+#   3. Updating the policy network to increase probability of good actions
+#   4. Clipping updates to prevent the policy from changing too drastically
+#
+# PPO uses two neural networks:
+#   - Policy network (actor): Decides which actions to take
+#   - Value network (critic): Estimates how good a state is
+#
+# The "proximal" in PPO means it constrains policy updates to be small,
+# which makes training more stable than earlier policy gradient methods.
+# ============================================================================
+
+# --- Core PPO Hyperparameters ---
+# Learning rate: How fast the networks update. Lower = more stable, slower.
+# 2.5e-4 is a good default for Atari/NES games.
+learning_rate: 2.5e-4
+
+# Number of steps to collect before each policy update.
+# Higher = more experience per update, but uses more memory.
+n_steps: 512
+
+# Minibatch size for network updates.
+# Must divide evenly into n_steps * n_envs.
+batch_size: 64
+
+# Number of optimization epochs per update.
+# Each epoch passes through the collected experience once.
+n_epochs: 10
+
+# Discount factor (gamma): How much future rewards matter.
+# 0.99 means rewards 100 steps away are worth ~37% of immediate rewards.
+gamma: 0.99
+
+# GAE lambda: Controls the bias-variance tradeoff in advantage estimation.
+# Higher = less bias, more variance. 0.95 is standard.
+gae_lambda: 0.95
+
+# PPO clip range: How much the policy can change per update.
+# 0.2 means the probability ratio is clipped to [0.8, 1.2].
+clip_range: 0.2
+
+# Entropy coefficient: Encourages exploration by rewarding randomness.
+# Higher = more exploration. Decays naturally as training progresses.
+ent_coef: 0.01
+
+# Value function coefficient: Weight of the value loss in total loss.
+vf_coef: 0.5
+
+# Maximum gradient norm: Clips gradients to prevent explosion.
+max_grad_norm: 0.5
+
+# --- Training Settings ---
+# Total timesteps (environment steps) to train for.
+# 1M is enough to see learning; 5-10M for a well-trained agent.
+total_timesteps: 1000000
+
+# Save model checkpoint every N timesteps.
+save_freq: 50000
+
+# Evaluate the model every N timesteps.
+eval_freq: 10000
+
+# Number of episodes to run during evaluation.
+eval_episodes: 5
+
+# --- Environment Settings ---
+# How many frames to skip (repeat the same action).
+frame_skip: 4
+
+# Number of consecutive frames to stack as input.
+frame_stack: 4
+
+# Target resolution for frame preprocessing.
+downscale_size: [84, 84]
+
+# Convert frames to grayscale.
+grayscale: true
+
+# --- Visualization ---
+# Render game to dashboard every N episodes.
+render_every_n_episodes: 1
+
+# Update graphs every N episodes.
+graph_update_interval: 5
+
+# --- Logging ---
+log_dir: "./logs/ppo/"

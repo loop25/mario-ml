@@ -1,0 +1,100 @@
+# ============================================================================
+# DQN (Deep Q-Network) Configuration
+# ============================================================================
+# DQN learns to estimate the value (Q-value) of each action in each state.
+# It uses a neural network to approximate the Q-function, which maps
+# (state, action) pairs to expected future rewards.
+#
+# Key concepts:
+#   - Q-value: Expected total future reward for taking action A in state S
+#   - Epsilon-greedy: Explore randomly (epsilon%) or exploit best action
+#   - Experience replay: Store past experiences, sample randomly to learn
+#   - Target network: Separate network for stable Q-value targets
+#
+# The agent learns by minimizing the difference between:
+#   - Predicted Q-value: Q(s, a) from the policy network
+#   - Target Q-value: r + gamma * max(Q'(s', a')) from the target network
+#
+# DQN architecture: 3 convolutional layers + 1 fully connected layer
+# Input: 4 stacked 84x84 grayscale frames
+# Output: Q-value for each of the 7 actions
+# ============================================================================
+
+# --- Core DQN Hyperparameters ---
+# Learning rate for the Adam optimizer.
+learning_rate: 1.0e-4
+
+# Discount factor: How much future rewards are worth.
+gamma: 0.99
+
+# Epsilon-greedy exploration parameters:
+# Start fully random (1.0), decay to mostly greedy (0.01).
+epsilon_start: 1.0
+epsilon_end: 0.01
+# Multiply epsilon by this after each episode.
+# 0.995 means ~1000 episodes to go from 1.0 to ~0.007.
+epsilon_decay: 0.995
+
+# --- Experience Replay ---
+# Maximum number of experiences to store in the replay buffer.
+# Larger = more diverse training data, but more memory usage.
+# 100K experiences ≈ 3-4 GB of RAM with 84x84x4 observations.
+buffer_size: 100000
+
+# Number of experiences to sample per training step.
+batch_size: 32
+
+# Number of steps to collect before starting training.
+# Fills the replay buffer with diverse initial experiences.
+learning_starts: 10000
+
+# --- Target Network ---
+# Update the target network every N training steps.
+# More frequent = less stable but faster learning.
+target_update_freq: 1000
+
+# --- Network Architecture ---
+# 3 convolutional layers followed by fully connected layers.
+# This is the classic DQN architecture from Mnih et al. (2015).
+conv_layers:
+  - filters: 32       # Conv1: 32 filters, 8x8 kernel, stride 4
+    kernel_size: 8     # Captures large-scale features (platforms, enemies)
+    stride: 4
+  - filters: 64       # Conv2: 64 filters, 4x4 kernel, stride 2
+    kernel_size: 4     # Captures medium-scale features (gaps, blocks)
+    stride: 2
+  - filters: 64       # Conv3: 64 filters, 3x3 kernel, stride 1
+    kernel_size: 3     # Captures fine details (items, edges)
+    stride: 1
+
+fc_layers:
+  - 512                # Fully connected layer with 512 neurons
+
+# --- Training Settings ---
+# Maximum number of episodes to train for.
+num_episodes: 5000
+
+# Maximum steps per episode (prevents infinite loops).
+max_steps_per_episode: 5000
+
+# Save checkpoint every N episodes.
+save_freq: 100
+
+# Evaluate model every N episodes.
+eval_freq: 50
+
+# Number of evaluation episodes.
+eval_episodes: 5
+
+# --- Environment Settings ---
+frame_skip: 4
+frame_stack: 4
+downscale_size: [84, 84]
+grayscale: true
+
+# --- Visualization ---
+render_every_n_episodes: 1
+graph_update_interval: 5
+
+# --- Logging ---
+log_dir: "./logs/dqn/"

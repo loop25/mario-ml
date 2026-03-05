@@ -1,0 +1,12 @@
+{
+  "algorithm": "NEATTrainer",
+  "episode": 2,
+  "best_reward": 364.5900000000011,
+  "best_distance": 434,
+  "elapsed_seconds": 19.67505717277527,
+  "elapsed_time": "19s",
+  "timestamp": "2026-02-15 23:12:10",
+  "config": {
+    "config_path": "C:\\Projects\\mario-ml\\config\\neat_config.txt"
+  }
+}

@@ -1,0 +1,48 @@
+# ============================================================================
+# Streaming & Recording Configuration
+# ============================================================================
+# Settings for video recording and future streaming integration.
+#
+# Currently supported: Video recording to MP4
+# Future: Virtual camera, NDI output, MJPEG stream
+# ============================================================================
+
+# --- Recording Settings ---
+recording:
+  # Output directory for recorded videos
+  output_dir: "./recordings"
+  # Video codec (mp4v for compatibility, h264 for quality)
+  codec: "mp4v"
+  # Output frame rate (independent of training speed)
+  fps: 30
+  # Output resolution (matches dashboard by default)
+  resolution: [1400, 800]
+
+# --- Stream-Ready Display Settings ---
+display:
+  # Cap dashboard frame rate for consistent stream output
+  fps_cap: 60
+  # Dashboard window title (shown in OBS source list)
+  window_title: "Mario ML Dashboard"
+
+# --- Future: Virtual Camera Settings ---
+# virtual_camera:
+#   enabled: false
+#   resolution: [1920, 1080]
+#   fps: 30
+#   device_name: "Mario ML Virtual Camera"
+
+# --- Future: NDI Settings ---
+# ndi:
+#   enabled: false
+#   stream_name: "Mario ML Training"
+#   resolution: [1920, 1080]
+#   fps: 30
+
+# --- Future: Stream Overlay Settings ---
+# overlay:
+#   show_algorithm_label: true
+#   show_episode_counter: true
+#   show_timer: true
+#   branding_image: null  # Path to logo/watermark image
+#   position: "bottom_right"

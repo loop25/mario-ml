@@ -1,0 +1,43 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+*.egg-info/
+dist/
+build/
+*.egg
+
+# Virtual environment
+venv/
+env/
+.venv/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Models and checkpoints (large binary files)
+models/**/*.pkl
+models/**/*.pt
+models/**/*.zip
+!models/*/.gitkeep
+
+# Logs
+logs/
+*.log
+
+# Recordings (large video files)
+recordings/
+!recordings/.gitkeep
+
+# OS files
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Temporary files
+*.tmp
+*.bak

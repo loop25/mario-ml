@@ -1,0 +1,145 @@
+# ============================================================================
+# NEAT Configuration for Super Mario Bros ML
+# ============================================================================
+# NEAT (NeuroEvolution of Augmenting Topologies) evolves neural network
+# topology and weights through a genetic algorithm. Networks start simple
+# and grow in complexity as needed.
+#
+# Key concepts:
+#   - Population: Group of neural networks (genomes) that evolve together
+#   - Species: Subgroups of similar networks that compete within species
+#   - Fitness: How well each network plays Mario (total reward)
+#   - Mutation: Random changes to network weights and structure
+#   - Crossover: Combining two successful networks to create offspring
+#
+# Input: 13x13 = 169 downsampled grayscale pixels from the game screen
+# Output: 7 values, one per action (highest value = chosen action)
+# ============================================================================
+
+[NEAT]
+# Fitness criterion: 'max' means higher fitness is better
+fitness_criterion     = max
+# Stop evolution if any genome reaches this fitness
+fitness_threshold     = 100000
+# If True, never terminate based on fitness_threshold (run for all generations)
+no_fitness_termination = False
+# Number of genomes in the population (more = better search, slower)
+pop_size              = 50
+# If all species go extinct, reset to random population
+reset_on_extinction   = True
+
+[DefaultGenome]
+# --- Network Architecture ---
+# 13x13 downsampled grayscale image = 169 input neurons
+num_inputs              = 169
+# Start with no hidden neurons (NEAT will add them via mutation)
+num_hidden              = 0
+# 7 outputs: one per action in our simplified action space
+num_outputs             = 7
+
+# --- Activation Functions ---
+# Default activation for new nodes
+activation_default      = relu
+# Chance of mutating a node's activation function
+activation_mutate_rate  = 0.05
+# Available activation functions for mutation
+activation_options      = relu sigmoid tanh
+
+# --- Aggregation ---
+# How inputs to a node are combined before activation
+aggregation_default     = sum
+aggregation_mutate_rate = 0.0
+aggregation_options     = sum
+
+# --- Genome Compatibility ---
+# These control how "different" two genomes need to be to form separate species
+# Higher values = fewer species, lower values = more species
+compatibility_disjoint_coefficient = 1.0
+compatibility_weight_coefficient   = 0.5
+
+# --- Structural Mutation Rates ---
+# Probability of adding a new connection between existing nodes
+conn_add_prob           = 0.5
+# Probability of removing an existing connection
+conn_delete_prob        = 0.5
+# Probability of adding a new hidden node (splits an existing connection)
+node_add_prob           = 0.2
+# Probability of removing a hidden node
+node_delete_prob        = 0.2
+
+# --- Weight Mutation ---
+# Initial weight distribution: Gaussian with mean=0, stdev=1
+weight_init_mean        = 0.0
+weight_init_stdev       = 1.0
+weight_init_type        = gaussian
+weight_max_value        = 30
+weight_min_value        = -30
+# How much weights change when mutated (power of the Gaussian perturbation)
+weight_mutate_power     = 0.5
+# Probability of mutating any given weight
+weight_mutate_rate      = 0.8
+# Probability of completely replacing a weight (vs. perturbing it)
+weight_replace_rate     = 0.1
+
+# --- Bias Mutation (same idea as weights, for node biases) ---
+bias_init_mean          = 0.0
+bias_init_stdev         = 1.0
+bias_init_type          = gaussian
+bias_max_value          = 30
+bias_min_value          = -30
+bias_mutate_power       = 0.5
+bias_mutate_rate        = 0.7
+bias_replace_rate       = 0.1
+
+# --- Response Mutation ---
+# Response multiplier for each node (usually left at 1.0)
+response_init_mean      = 1.0
+response_init_stdev     = 0.0
+response_init_type      = gaussian
+response_max_value      = 30
+response_min_value      = -30
+response_mutate_power   = 0.0
+response_mutate_rate    = 0.0
+response_replace_rate   = 0.0
+
+# --- Connection Enable/Disable ---
+# Whether connections start enabled
+enabled_default         = True
+# Probability of toggling a connection's enabled state
+enabled_mutate_rate     = 0.01
+# Additional rate to flip disabled->enabled when adding connections
+enabled_rate_to_true_add  = 0.0
+# Additional rate to flip enabled->disabled when adding connections
+enabled_rate_to_false_add = 0.0
+
+# Network type: feed-forward (no recurrent connections)
+feed_forward            = True
+# Start with all inputs connected to all outputs
+initial_connection      = full
+# Allow only one structural mutation per genome per generation
+# (prevents too many changes at once, helps maintain stability)
+single_structural_mutation = False
+# 'default' means structural mutations use the standard probability check
+structural_mutation_surer  = default
+
+[DefaultSpeciesSet]
+# Compatibility threshold for grouping genomes into species
+# Lower = more species (more diversity, slower convergence)
+# Higher = fewer species (less diversity, faster convergence)
+compatibility_threshold = 3.0
+
+[DefaultStagnation]
+# How species fitness is measured for stagnation detection
+species_fitness_func = max
+# Remove species that haven't improved in this many generations
+max_stagnation       = 20
+# Always keep at least this many species (prevents total extinction)
+species_elitism      = 2
+
+[DefaultReproduction]
+# Number of top genomes in each species that survive to next generation
+elitism            = 2
+# Fraction of each species that gets to reproduce
+survival_threshold = 0.2
+# Minimum number of genomes per species (prevents species from going extinct too easily)
+min_species_size   = 2
