@@ -31,6 +31,7 @@ gamma: 0.99
 # Start fully random (1.0), decay to mostly greedy (0.01).
 epsilon_start: 1.0
 epsilon_end: 0.01
+# Epsilon decay rate per episode (0.995 = slow exploration, 0.99 = faster)
 # Multiply epsilon by this after each episode.
 # 0.995 means ~1000 episodes to go from 1.0 to ~0.007.
 epsilon_decay: 0.995

@@ -295,7 +295,7 @@ class DQNTrainer(BaseTrainer):
         self.optimizer.zero_grad()
         loss.backward()
         # Gradient clipping for stability
-        torch.nn.utils.clip_grad_norm_(self.policy_net.parameters(), 10.0)
+        torch.nn.utils.clip_grad_norm_(self.policy_net.parameters(), 1.0)
         self.optimizer.step()
 
         return loss.item()
