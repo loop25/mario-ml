@@ -178,6 +178,13 @@ Examples:
         help='YouTube stream key for live streaming',
     )
 
+    # Curriculum learning
+    parser.add_argument(
+        '--curriculum',
+        action='store_true',
+        help='Enable curriculum learning for whole-game training (all 32 stages)',
+    )
+
     return parser.parse_args()
 
 
@@ -228,6 +235,8 @@ def main():
         print(f'  Parallel Envs: {num_envs}')
     if args.next_stage:
         print(f'  Stage Progression: ON (auto-advance after training)')
+    if args.curriculum:
+        print(f'  Curriculum Learning: ON (all 32 stages)')
     print(f'{"="*60}\n')
 
     # ================================================================
@@ -299,6 +308,19 @@ def main():
             print(f'[Stream] Failed to start: {stream_manager.error_message}')
             stream_manager = None
             overlay_manager = None
+
+    # ================================================================
+    # Curriculum Learning
+    # ================================================================
+    curriculum = None
+    if args.curriculum:
+        from src.training.curriculum import CurriculumManager
+        curriculum = CurriculumManager(
+            start_world=args.world,
+            start_stage=args.stage,
+        )
+        print(f'Curriculum learning enabled: training across all 32 stages')
+        print(f'Starting at World {args.world}-{args.stage}')
 
     # ================================================================
     # Create Visualization Dashboard
@@ -415,15 +437,29 @@ def main():
                     trainer.train(num_episodes=num_episodes)
 
                 # Check if we should advance to the next stage
-                if not args.next_stage or trainer._dashboard_closed:
-                    break
+                if curriculum:
+                    # Curriculum-based stage advancement
+                    latest_reward = trainer.best_reward if hasattr(trainer, 'best_reward') else 0
+                    curriculum.report_episode(latest_reward, completed=False)
 
-                result = next_world_stage(current_world, current_stage)
-                if result is None:
-                    print('\nAll stages complete! (8-4 reached)')
+                    if curriculum.should_advance():
+                        result = curriculum.advance()
+                        if result is None:
+                            print('\nAll 32 stages complete!')
+                            break
+                        next_w, next_s = result
+                        print(f'\nCurriculum advancing: -> World {next_w}-{next_s}')
+                    else:
+                        # Not ready to advance yet — keep training this stage
+                        continue
+                elif not args.next_stage or trainer._dashboard_closed:
                     break
-
-                next_w, next_s = result
+                else:
+                    result = next_world_stage(current_world, current_stage)
+                    if result is None:
+                        print('\nAll stages complete! (8-4 reached)')
+                        break
+                    next_w, next_s = result
                 print(f'\n{"="*60}')
                 print(f'  ADVANCING: World {current_world}-{current_stage} '
                       f'→ World {next_w}-{next_s}')
