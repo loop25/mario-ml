@@ -225,6 +225,11 @@ def main():
         args.visualize = True
         print('Note: Streaming requires --visualize. Enabling visualization.')
 
+    # Warn about mutually exclusive stage progression options
+    if args.curriculum and args.next_stage:
+        print('WARNING: --next-stage is ignored when --curriculum is enabled.')
+        args.next_stage = False
+
     print(f'\n{"="*60}')
     print(f'  Super Mario Bros ML Training')
     print(f'  Algorithm: {args.algorithm.upper()}')
@@ -314,13 +319,17 @@ def main():
     # ================================================================
     curriculum = None
     if args.curriculum:
-        from src.training.curriculum import CurriculumManager
-        curriculum = CurriculumManager(
-            start_world=args.world,
-            start_stage=args.stage,
-        )
-        print(f'Curriculum learning enabled: training across all 32 stages')
-        print(f'Starting at World {args.world}-{args.stage}')
+        try:
+            from src.training.curriculum import CurriculumManager
+            curriculum = CurriculumManager(
+                start_world=args.world,
+                start_stage=args.stage,
+            )
+            print(f'Curriculum learning enabled: training across all 32 stages')
+            print(f'Starting at World {args.world}-{args.stage}')
+        except ImportError as e:
+            print(f'[Curriculum] ERROR: Could not load CurriculumManager: {e}')
+            print(f'[Curriculum] Falling back to standard training mode.')
 
     # ================================================================
     # Create Visualization Dashboard

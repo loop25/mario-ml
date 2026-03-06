@@ -805,6 +805,11 @@ class MarioLauncher:
         if self.stream_var.get():
             twitch_key = self.twitch_key_var.get().strip()
             youtube_key = self.youtube_key_var.get().strip()
+            if not twitch_key and not youtube_key:
+                self._set_status(
+                    "Streaming enabled but no keys provided.", ACCENT_RED
+                )
+                return
             if twitch_key:
                 cmd.extend(["--stream-twitch", twitch_key])
             if youtube_key:
@@ -813,7 +818,9 @@ class MarioLauncher:
         # Add music flag
         if self.music_var.get():
             music_dir = self.music_dir_var.get().strip()
-            if music_dir and os.path.isdir(music_dir):
+            if not music_dir or not os.path.isdir(music_dir):
+                print(f'[Music] Directory not found: {music_dir!r}, skipping music')
+            else:
                 cmd.extend(["--music", music_dir])
 
         # Launch the subprocess
