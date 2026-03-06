@@ -216,6 +216,13 @@ class DashboardCallback(BaseCallback):
         if distance > self.trainer.best_distance:
             self.trainer.best_distance = distance
 
+        # Notify episode callbacks (curriculum learning, etc.)
+        self.trainer._fire_episode_complete(
+            reward=reward,
+            distance=distance,
+            completed=self._env_stage_completed[env_index],
+        )
+
         # Update dashboard
         if self.dashboard:
             loss = 0.0  # Updated in _on_rollout_end instead

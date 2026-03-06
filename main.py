@@ -422,6 +422,14 @@ def main():
             avg_reward = trainer.evaluate(num_episodes=10)
             print(f'\nFinal average reward: {avg_reward:.0f}')
         else:
+            # Register curriculum callback so report_episode is called
+            # per-episode (inside the trainer loop), not once per train() call.
+            if curriculum:
+                trainer.add_episode_callback(
+                    lambda reward, distance=0, completed=False:
+                        curriculum.report_episode(reward, distance, completed)
+                )
+
             # Training mode — train on current stage (and optionally advance)
             while True:
                 if args.algorithm == 'neat':
@@ -447,10 +455,9 @@ def main():
 
                 # Check if we should advance to the next stage
                 if curriculum:
-                    # Curriculum-based stage advancement
-                    latest_reward = trainer.best_reward if hasattr(trainer, 'best_reward') else 0
-                    curriculum.report_episode(latest_reward, completed=False)
-
+                    # Curriculum callbacks have been reporting per-episode
+                    # data throughout training.  Now check if the sliding
+                    # window shows readiness to advance.
                     if curriculum.should_advance():
                         result = curriculum.advance()
                         if result is None:

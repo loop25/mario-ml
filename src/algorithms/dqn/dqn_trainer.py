@@ -432,11 +432,18 @@ class DQNTrainer(BaseTrainer):
             if max_distance > self.best_distance:
                 self.best_distance = max_distance
 
+            # Notify episode callbacks (curriculum learning, etc.)
+            stage_completed = info.get('stage_completed', False)
+            self._fire_episode_complete(
+                reward=episode_reward,
+                distance=max_distance,
+                completed=stage_completed,
+            )
+
             # Average loss for this episode
             avg_loss = episode_loss / max(loss_count, 1)
 
             # Check for stage completion
-            stage_completed = info.get('stage_completed', False)
             if stage_completed:
                 completions = info.get('stage_completions', 0)
                 print(f'  *** STAGE COMPLETED! (Episode {episode}, '

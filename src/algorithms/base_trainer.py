@@ -100,6 +100,10 @@ class BaseTrainer(ABC):
         self._pause_event = threading.Event()
         self._pause_event.set()  # Not paused initially
 
+        # Episode callbacks — used by curriculum learning and other
+        # cross-cutting concerns that need per-episode notifications.
+        self._episode_callbacks = []
+
         # Checkpoint settings (can be overridden in config)
         self.checkpoint_interval = config.get('save_freq', 50)
 
@@ -145,6 +149,46 @@ class BaseTrainer(ABC):
             if self.visualizer:
                 self.visualizer.update()
         return True
+
+    def add_episode_callback(self, callback) -> None:
+        """
+        Register a callback to be invoked after every episode completes.
+
+        Callbacks receive keyword arguments:
+            reward (float): Total episode reward.
+            distance (int): Max x-position reached.
+            completed (bool): Whether the stage was completed.
+
+        Used by CurriculumManager to receive per-episode data for
+        sliding-window advancement decisions.
+
+        Args:
+            callback: Callable(reward, distance, completed) -> None.
+        """
+        self._episode_callbacks.append(callback)
+
+    def _fire_episode_complete(
+        self,
+        reward: float,
+        distance: int = 0,
+        completed: bool = False,
+    ) -> None:
+        """
+        Notify all registered callbacks that an episode has finished.
+
+        Called by each trainer subclass at the point where an episode
+        (or genome evaluation, for NEAT) completes.
+
+        Args:
+            reward: Total episode reward.
+            distance: Max x-position reached this episode.
+            completed: Whether the stage was cleared.
+        """
+        for cb in self._episode_callbacks:
+            try:
+                cb(reward=reward, distance=distance, completed=completed)
+            except Exception as e:
+                print(f'  Warning: episode callback error: {e}')
 
     @abstractmethod
     def train(self, num_episodes: int) -> None:

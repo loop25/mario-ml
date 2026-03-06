@@ -372,6 +372,13 @@ class NEATTrainer(BaseTrainer):
             if result.distance > self.best_distance:
                 self.best_distance = result.distance
 
+            # Notify episode callbacks (curriculum learning, etc.)
+            self._fire_episode_complete(
+                reward=result.fitness,
+                distance=result.distance,
+                completed=result.stage_completed,
+            )
+
         if not gen_rewards:
             return
 
