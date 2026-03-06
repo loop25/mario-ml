@@ -156,6 +156,14 @@ Examples:
              'Try 4 for a 2x2 grid, 8 for a 3x3 grid.',
     )
 
+    # Music
+    parser.add_argument(
+        '--music',
+        type=str,
+        default=None,
+        help='Path to music directory for background playback (default: assets/music/)',
+    )
+
     return parser.parse_args()
 
 
@@ -229,6 +237,20 @@ def main():
         print(f'Recording enabled. Output: recordings/')
 
     # ================================================================
+    # Music Manager
+    # ================================================================
+    music_manager = None
+    if not args.eval:  # No music in eval mode by default
+        music_dir = args.music or os.path.join(os.path.dirname(os.path.abspath(__file__)), 'assets', 'music')
+        if os.path.isdir(music_dir):
+            from src.audio.music_manager import MusicManager
+            music_manager = MusicManager(music_dir)
+            if music_manager.track_count > 0:
+                print(f'Loaded {music_manager.track_count} music track(s) from {music_dir}')
+            else:
+                music_manager = None
+
+    # ================================================================
     # Create Visualization Dashboard
     # ================================================================
     dashboard = None
@@ -237,6 +259,7 @@ def main():
             algorithm=args.algorithm,
             num_envs=num_envs,
             recorder=recorder,
+            music_manager=music_manager,
         )
         print('Dashboard window opened.')
 
@@ -305,6 +328,9 @@ def main():
         _pg.event.pump()      # Process internal pygame events
         _pg.event.clear()     # Discard any queued events (incl. stale QUIT)
         dashboard.update()    # Render initial dashboard frame
+
+    if music_manager:
+        music_manager.play()
 
     try:
         if args.eval:

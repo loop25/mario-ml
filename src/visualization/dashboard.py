@@ -108,6 +108,7 @@ class Dashboard:
         graph_update_interval: int = 1,
         fps_cap: int = 60,
         recorder=None,
+        music_manager=None,
     ):
         # Initialize pygame
         pygame.init()
@@ -119,6 +120,7 @@ class Dashboard:
         self.graph_update_interval = graph_update_interval
         self.fps_cap = fps_cap
         self.recorder = recorder
+        self.music_manager = music_manager
         self.metrics = MetricsTracker()
 
         # Compute initial layout dimensions from default size
@@ -565,6 +567,10 @@ class Dashboard:
                 self._pending_resize = (w, h)
                 self._resize_timer = pygame.time.get_ticks()
 
+            elif event.type == pygame.USEREVENT + 99:
+                if self.music_manager:
+                    self.music_manager.handle_music_end_event()
+
             elif event.type == pygame.KEYDOWN:
                 if event.key == pygame.K_ESCAPE:
                     return False
@@ -579,6 +585,15 @@ class Dashboard:
                         print(f'Screenshot saved: {filename}')
                     except Exception as e:
                         print(f'Screenshot failed: {e}')
+                elif event.key == pygame.K_m:
+                    if self.music_manager:
+                        self.music_manager.toggle_mute()
+                elif event.key == pygame.K_UP:
+                    if self.music_manager:
+                        self.music_manager.volume_up()
+                elif event.key == pygame.K_DOWN:
+                    if self.music_manager:
+                        self.music_manager.volume_down()
         return True
 
     def get_surface(self) -> pygame.Surface:
