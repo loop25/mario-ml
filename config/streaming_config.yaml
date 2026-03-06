@@ -46,3 +46,15 @@ display:
 #   show_timer: true
 #   branding_image: null  # Path to logo/watermark image
 #   position: "bottom_right"
+
+# --- Streaming Settings ---
+streaming:
+  # Output resolution for stream (independent of dashboard)
+  resolution: [1280, 720]
+  # Stream frame rate
+  fps: 30
+  # Video bitrate (4500k recommended for 720p on Twitch)
+  video_bitrate: "4500k"
+  # Stream keys (set via CLI args or here)
+  twitch_key: null
+  youtube_key: null

@@ -109,6 +109,8 @@ class Dashboard:
         fps_cap: int = 60,
         recorder=None,
         music_manager=None,
+        stream_manager=None,
+        overlay_manager=None,
     ):
         # Initialize pygame
         pygame.init()
@@ -121,6 +123,8 @@ class Dashboard:
         self.fps_cap = fps_cap
         self.recorder = recorder
         self.music_manager = music_manager
+        self.stream_manager = stream_manager
+        self.overlay_manager = overlay_manager
         self.metrics = MetricsTracker()
 
         # Compute initial layout dimensions from default size
@@ -280,6 +284,25 @@ class Dashboard:
             )
 
     # ========================================================================
+    # Streaming Helper
+    # ========================================================================
+
+    def _send_stream_frame(self) -> None:
+        """Capture the current screen and send it to the streaming pipeline."""
+        if not self.stream_manager or not self.stream_manager.is_streaming:
+            return
+        surface = self.screen.copy()
+        stream_frame = pygame.surfarray.array3d(surface)
+        stream_frame = np.transpose(stream_frame, (1, 0, 2))  # (H, W, 3)
+        if self.overlay_manager:
+            stream_frame = self.overlay_manager.compose(
+                stream_frame,
+                is_live=True,
+                algorithm=self.algorithm,
+            )
+        self.stream_manager.send_frame(stream_frame)
+
+    # ========================================================================
     # Main Update Methods
     # ========================================================================
 
@@ -399,6 +422,9 @@ class Dashboard:
         if self.recorder is not None:
             self.recorder.capture_frame(self.screen)
 
+        # Send frame to stream if active
+        self._send_stream_frame()
+
         # Flip the display buffer
         pygame.display.flip()
 
@@ -504,6 +530,9 @@ class Dashboard:
         # Capture frame for video recording (before flip)
         if self.recorder is not None:
             self.recorder.capture_frame(self.screen)
+
+        # Send frame to stream if active
+        self._send_stream_frame()
 
         pygame.display.flip()
 

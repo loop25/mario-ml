@@ -164,6 +164,20 @@ Examples:
         help='Path to music directory for background playback (default: assets/music/)',
     )
 
+    # Streaming
+    parser.add_argument(
+        '--stream-twitch',
+        type=str,
+        default=None,
+        help='Twitch stream key for live streaming',
+    )
+    parser.add_argument(
+        '--stream-youtube',
+        type=str,
+        default=None,
+        help='YouTube stream key for live streaming',
+    )
+
     return parser.parse_args()
 
 
@@ -198,6 +212,11 @@ def main():
     if args.record and not args.visualize:
         args.visualize = True
         print('Note: --record requires --visualize. Enabling visualization.')
+
+    # Streaming requires visualization (captures the dashboard surface)
+    if (args.stream_twitch or args.stream_youtube) and not args.visualize:
+        args.visualize = True
+        print('Note: Streaming requires --visualize. Enabling visualization.')
 
     print(f'\n{"="*60}')
     print(f'  Super Mario Bros ML Training')
@@ -251,6 +270,37 @@ def main():
                 music_manager = None
 
     # ================================================================
+    # Streaming
+    # ================================================================
+    stream_manager = None
+    overlay_manager = None
+    twitch_key = args.stream_twitch
+    youtube_key = args.stream_youtube
+
+    if twitch_key or youtube_key:
+        from src.streaming.stream_manager import StreamManager
+        from src.streaming.overlay_manager import OverlayManager
+
+        # Get first music file for audio stream (if available)
+        audio_file = None
+        if music_manager and music_manager.playlist:
+            audio_file = music_manager.playlist[0]
+
+        stream_manager = StreamManager(
+            twitch_key=twitch_key,
+            youtube_key=youtube_key,
+            audio_file=audio_file,
+        )
+        overlay_manager = OverlayManager(resolution=(1280, 720))
+
+        if stream_manager.start():
+            print('[Stream] Streaming started successfully')
+        else:
+            print(f'[Stream] Failed to start: {stream_manager.error_message}')
+            stream_manager = None
+            overlay_manager = None
+
+    # ================================================================
     # Create Visualization Dashboard
     # ================================================================
     dashboard = None
@@ -260,6 +310,8 @@ def main():
             num_envs=num_envs,
             recorder=recorder,
             music_manager=music_manager,
+            stream_manager=stream_manager,
+            overlay_manager=overlay_manager,
         )
         print('Dashboard window opened.')
 
@@ -472,6 +524,8 @@ def main():
         pass
     finally:
         # Cleanup
+        if stream_manager:
+            stream_manager.stop()
         if recorder:
             recorder.stop()
         if dashboard:
