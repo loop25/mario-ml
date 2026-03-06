@@ -474,6 +474,10 @@ class NEATTrainer(BaseTrainer):
         activate = net.activate
 
         while not done and steps < max_steps:
+            # Check for pause
+            if not self.check_pause():
+                return total_reward, max_distance, action_counts, last_frame, False
+
             # Preprocess observation for NEAT.
             # obs shape is (13, 13, 1) — flatten to 169 values and
             # normalise to [0, 1]. Using multiply instead of divide

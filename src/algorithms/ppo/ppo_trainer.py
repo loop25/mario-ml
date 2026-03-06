@@ -95,6 +95,10 @@ class DashboardCallback(BaseCallback):
         Returns:
             bool: True to continue training, False to stop.
         """
+        # Check for pause (blocks this thread until resumed)
+        if not self.trainer.check_pause():
+            return False  # Abort training
+
         # If dashboard was already closed, stop training immediately
         if self.trainer._dashboard_closed:
             return False

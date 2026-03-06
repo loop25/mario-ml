@@ -366,6 +366,10 @@ class DQNTrainer(BaseTrainer):
             last_frame = None
 
             for step in range(self.max_steps):
+                # Check for pause
+                if not self.check_pause():
+                    return
+
                 self.total_steps += 1
 
                 # Select action (epsilon-greedy)
