@@ -159,7 +159,7 @@ class StreamManager:
             except (BrokenPipeError, OSError):
                 pass
             try:
-                self._process.wait(timeout=5)
+                self._process.wait(timeout=2)
             except subprocess.TimeoutExpired:
                 self._process.kill()
             self._process = None

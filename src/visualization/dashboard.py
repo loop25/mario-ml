@@ -767,6 +767,18 @@ class Dashboard:
             self._last_fps_time = now
 
     def close(self) -> None:
-        """Clean up pygame and matplotlib resources."""
-        self.graph_panel.cleanup()
-        pygame.quit()
+        """Clean up pygame and matplotlib resources.
+
+        Safe to call multiple times — guarded to avoid double-cleanup.
+        """
+        if getattr(self, '_closed', False):
+            return
+        self._closed = True
+        try:
+            self.graph_panel.cleanup()
+        except Exception:
+            pass
+        try:
+            pygame.quit()
+        except Exception:
+            pass

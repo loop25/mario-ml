@@ -144,6 +144,8 @@ class BaseTrainer(ABC):
             # While waiting, keep processing dashboard events
             if self.visualizer and not self.visualizer.handle_events():
                 self._dashboard_closed = True
+                print('\nDashboard closed. Saving model...')
+                self.visualizer.close()
                 self._save_on_exit()
                 return False
             if self.visualizer:
@@ -287,9 +289,11 @@ class BaseTrainer(ABC):
 
         # Check for user events (close window, pause, etc.)
         if not self.visualizer.handle_events():
-            # User closed the window — trigger graceful shutdown (once)
+            # User closed the window — close it immediately so it
+            # doesn't appear frozen while the model saves.
             self._dashboard_closed = True
             print('\nDashboard closed. Saving model...')
+            self.visualizer.close()
             self._save_on_exit()
             return False
 
@@ -340,6 +344,7 @@ class BaseTrainer(ABC):
         if not self.visualizer.handle_events():
             self._dashboard_closed = True
             print('\nDashboard closed. Saving model...')
+            self.visualizer.close()
             self._save_on_exit()
             return False
 
