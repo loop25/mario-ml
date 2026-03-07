@@ -34,6 +34,25 @@ MAIN_SCRIPT = os.path.join(PROJECT_ROOT, "main.py")
 MODELS_DIR = os.path.join(PROJECT_ROOT, "models")
 RECORDINGS_DIR = os.path.join(PROJECT_ROOT, "recordings")
 
+
+def _find_venv_python() -> str:
+    """Return the path to the venv's Python, falling back to sys.executable.
+
+    This lets the launcher work correctly even when launched with the
+    system Python (e.g. by double-clicking).  We look for the venv
+    directory that lives alongside this script.
+    """
+    if sys.platform == "win32":
+        venv_python = os.path.join(PROJECT_ROOT, "venv", "Scripts", "python.exe")
+    else:
+        venv_python = os.path.join(PROJECT_ROOT, "venv", "bin", "python")
+    if os.path.isfile(venv_python):
+        return venv_python
+    return sys.executable
+
+
+VENV_PYTHON = _find_venv_python()
+
 # ---------------------------------------------------------------------------
 # Color palette — dark theme matching the pygame dashboard aesthetic
 # ---------------------------------------------------------------------------
@@ -749,9 +768,9 @@ class MarioLauncher:
             self._set_status("Please load a model for evaluation.", ACCENT_RED)
             return
 
-        # Build the command
+        # Build the command — use venv Python so all deps are available
         cmd = [
-            sys.executable,
+            VENV_PYTHON,
             MAIN_SCRIPT,
             "--algorithm", algo,
             "--world", world,
