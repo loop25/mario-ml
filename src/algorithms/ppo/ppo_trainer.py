@@ -364,11 +364,12 @@ class PPOTrainer(BaseTrainer):
     def _select_device() -> str:
         """Return ``'cuda'`` if CUDA works, otherwise ``'cpu'``.
 
-        Some GPUs report CUDA available but fail on actual kernel
-        execution (e.g. RTX 5070 Blackwell/sm_120 with older CUDA).
+        Runs a quick smoke test to verify GPU kernels actually work.
+        Some GPUs report CUDA available but fail on execution with
+        older CUDA toolkit versions.
 
-        Fix: Install PyTorch nightly with CUDA 12.8+:
-            pip install --pre torch torchvision torchaudio --index-url https://download.pytorch.org/whl/nightly/cu128
+        Fix: Install PyTorch with CUDA 12.8+:
+            pip install torch torchvision --index-url https://download.pytorch.org/whl/cu128
         """
         try:
             import torch
@@ -378,14 +379,16 @@ class PPOTrainer(BaseTrainer):
                 del a
                 torch.cuda.empty_cache()
                 gpu = torch.cuda.get_device_name(0)
-                print(f'PPO using device: cuda ({gpu})')
+                vram = torch.cuda.get_device_properties(0).total_mem
+                vram_gb = round(vram / 1024**3, 1)
+                print(f'PPO using device: cuda ({gpu}, {vram_gb}GB VRAM)')
                 return 'cuda'
         except (RuntimeError, Exception):
             pass
         print('PPO using device: cpu')
-        print('  Tip: RTX 50-series needs PyTorch nightly with cu128+')
-        print('  Run: pip install --pre torch torchvision torchaudio '
-              '--index-url https://download.pytorch.org/whl/nightly/cu128')
+        print('  Tip: Install CUDA-enabled PyTorch for GPU acceleration:')
+        print('  pip install torch torchvision '
+              '--index-url https://download.pytorch.org/whl/cu128')
         return 'cpu'
 
     def _wrap_env_for_sb3(self, env, num_envs: int = 1):

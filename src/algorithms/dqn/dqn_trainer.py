@@ -182,9 +182,9 @@ class DQNTrainer(BaseTrainer):
         """
         if not torch.cuda.is_available():
             print('DQN using device: cpu')
-            print('  Tip: RTX 50-series needs PyTorch nightly with cu128+')
-            print('  Run: pip install --pre torch torchvision torchaudio '
-                  '--index-url https://download.pytorch.org/whl/nightly/cu128')
+            print('  Tip: Install CUDA-enabled PyTorch for GPU acceleration:')
+            print('  pip install torch torchvision '
+                  '--index-url https://download.pytorch.org/whl/cu128')
             return torch.device('cpu')
         try:
             a = torch.randn(4, 4, device='cuda')
@@ -192,13 +192,15 @@ class DQNTrainer(BaseTrainer):
             del a
             torch.cuda.empty_cache()
             gpu = torch.cuda.get_device_name(0)
-            print(f'DQN using device: cuda ({gpu})')
+            vram = torch.cuda.get_device_properties(0).total_mem
+            vram_gb = round(vram / 1024**3, 1)
+            print(f'DQN using device: cuda ({gpu}, {vram_gb}GB VRAM)')
             return torch.device('cuda')
         except RuntimeError:
             print('DQN using device: cpu (CUDA kernels not supported on this GPU)')
-            print('  Tip: RTX 50-series needs PyTorch nightly with cu128+')
-            print('  Run: pip install --pre torch torchvision torchaudio '
-                  '--index-url https://download.pytorch.org/whl/nightly/cu128')
+            print('  Tip: Install CUDA-enabled PyTorch for GPU acceleration:')
+            print('  pip install torch torchvision '
+                  '--index-url https://download.pytorch.org/whl/cu128')
             return torch.device('cpu')
 
     def _preprocess_observation(self, obs: np.ndarray) -> np.ndarray:
