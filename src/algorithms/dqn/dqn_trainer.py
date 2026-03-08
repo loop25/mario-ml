@@ -182,9 +182,9 @@ class DQNTrainer(BaseTrainer):
         """
         if not torch.cuda.is_available():
             print('DQN using device: cpu')
-            print('  Tip: RTX 50-series needs PyTorch nightly with cu128+')
-            print('  Run: pip install --pre torch torchvision torchaudio '
-                  '--index-url https://download.pytorch.org/whl/nightly/cu128')
+            print('  Tip: Install CUDA-enabled PyTorch for GPU acceleration:')
+            print('  pip install torch torchvision '
+                  '--index-url https://download.pytorch.org/whl/cu128')
             return torch.device('cpu')
         try:
             a = torch.randn(4, 4, device='cuda')
@@ -192,13 +192,15 @@ class DQNTrainer(BaseTrainer):
             del a
             torch.cuda.empty_cache()
             gpu = torch.cuda.get_device_name(0)
-            print(f'DQN using device: cuda ({gpu})')
+            vram = torch.cuda.get_device_properties(0).total_mem
+            vram_gb = round(vram / 1024**3, 1)
+            print(f'DQN using device: cuda ({gpu}, {vram_gb}GB VRAM)')
             return torch.device('cuda')
         except RuntimeError:
             print('DQN using device: cpu (CUDA kernels not supported on this GPU)')
-            print('  Tip: RTX 50-series needs PyTorch nightly with cu128+')
-            print('  Run: pip install --pre torch torchvision torchaudio '
-                  '--index-url https://download.pytorch.org/whl/nightly/cu128')
+            print('  Tip: Install CUDA-enabled PyTorch for GPU acceleration:')
+            print('  pip install torch torchvision '
+                  '--index-url https://download.pytorch.org/whl/cu128')
             return torch.device('cpu')
 
     def _preprocess_observation(self, obs: np.ndarray) -> np.ndarray:
@@ -295,7 +297,7 @@ class DQNTrainer(BaseTrainer):
         self.optimizer.zero_grad()
         loss.backward()
         # Gradient clipping for stability
-        torch.nn.utils.clip_grad_norm_(self.policy_net.parameters(), 10.0)
+        torch.nn.utils.clip_grad_norm_(self.policy_net.parameters(), 1.0)
         self.optimizer.step()
 
         return loss.item()
@@ -366,6 +368,10 @@ class DQNTrainer(BaseTrainer):
             last_frame = None
 
             for step in range(self.max_steps):
+                # Check for pause
+                if not self.check_pause():
+                    return
+
                 self.total_steps += 1
 
                 # Select action (epsilon-greedy)
@@ -428,11 +434,18 @@ class DQNTrainer(BaseTrainer):
             if max_distance > self.best_distance:
                 self.best_distance = max_distance
 
+            # Notify episode callbacks (curriculum learning, etc.)
+            stage_completed = info.get('stage_completed', False)
+            self._fire_episode_complete(
+                reward=episode_reward,
+                distance=max_distance,
+                completed=stage_completed,
+            )
+
             # Average loss for this episode
             avg_loss = episode_loss / max(loss_count, 1)
 
             # Check for stage completion
-            stage_completed = info.get('stage_completed', False)
             if stage_completed:
                 completions = info.get('stage_completions', 0)
                 print(f'  *** STAGE COMPLETED! (Episode {episode}, '
@@ -607,9 +620,11 @@ class DQNTrainer(BaseTrainer):
                         print(f'  *** STAGE COMPLETED! (Episode {episodes_completed}, '
                               f'Env {env_idx}) ***')
 
+                    # Calculate avg loss before any reset
+                    avg_loss = total_loss / max(loss_count, 1)
+
                     # Print progress
                     if episodes_completed % 10 == 0:
-                        avg_loss = total_loss / max(loss_count, 1)
                         print(
                             f'  Ep {episodes_completed}: '
                             f'Reward={ep_reward:.0f}, '
@@ -623,7 +638,6 @@ class DQNTrainer(BaseTrainer):
 
                     # Update dashboard with metrics
                     if self.visualizer:
-                        avg_loss = total_loss / max(loss_count, 1) if loss_count > 0 else 0
                         metrics = {
                             'episode': episodes_completed,
                             'reward': ep_reward,

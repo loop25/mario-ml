@@ -29,6 +29,7 @@ Usage:
     trainer.save_checkpoint('models/neat/best')
 """
 
+import json
 import os
 import pickle
 import numpy as np
@@ -237,6 +238,13 @@ class NEATTrainer(BaseTrainer):
             if distance > self.best_distance:
                 self.best_distance = distance
 
+            # Notify curriculum / episode callbacks
+            self._fire_episode_complete(
+                reward=reward,
+                distance=distance,
+                completed=completed,
+            )
+
             # Keep the dashboard responsive between genomes.
             # Only pump the display every 5 genomes (instead of every
             # genome) to reduce overhead. The live genomes already update
@@ -372,6 +380,13 @@ class NEATTrainer(BaseTrainer):
             if result.distance > self.best_distance:
                 self.best_distance = result.distance
 
+            # Notify episode callbacks (curriculum learning, etc.)
+            self._fire_episode_complete(
+                reward=result.fitness,
+                distance=result.distance,
+                completed=result.stage_completed,
+            )
+
         if not gen_rewards:
             return
 
@@ -474,6 +489,10 @@ class NEATTrainer(BaseTrainer):
         activate = net.activate
 
         while not done and steps < max_steps:
+            # Check for pause
+            if not self.check_pause():
+                return total_reward, max_distance, action_counts, last_frame, False
+
             # Preprocess observation for NEAT.
             # obs shape is (13, 13, 1) — flatten to 169 values and
             # normalise to [0, 1]. Using multiply instead of divide
@@ -651,3 +670,20 @@ class NEATTrainer(BaseTrainer):
             print(f'Loaded genome with fitness: {loaded.fitness}')
         else:
             print(f'Warning: Unknown checkpoint format in {path}')
+
+        # Restore training state from metadata.json (saved by BaseTrainer)
+        checkpoint_dir = os.path.dirname(path) or '.'
+        metadata_path = os.path.join(checkpoint_dir, 'metadata.json')
+        if os.path.exists(metadata_path):
+            try:
+                with open(metadata_path, 'r') as f:
+                    meta = json.load(f)
+                self.episode_count = meta.get('episode', self.episode_count)
+                self.generation = self.episode_count
+                self.best_reward = meta.get('best_reward', self.best_reward)
+                self.best_distance = meta.get('best_distance', self.best_distance)
+                print(f'  Restored state: gen={self.generation}, '
+                      f'best_reward={self.best_reward:.1f}, '
+                      f'best_dist={self.best_distance}')
+            except (json.JSONDecodeError, KeyError) as e:
+                print(f'  Warning: Could not restore metadata: {e}')

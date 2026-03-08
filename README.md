@@ -58,7 +58,14 @@ C:\Projects\mario-ml\venv\Scripts\activate
 cd C:\Projects\mario-ml
 ```
 
-### Train with Live Dashboard
+### GUI Launcher (Recommended)
+```bash
+python launcher.py
+```
+
+The launcher provides a graphical interface for all training options — algorithm selection, world/stage, streaming keys, music toggle, curriculum learning, and more. No CLI flags to remember.
+
+### Train with Live Dashboard (CLI)
 ```bash
 # NEAT (neuroevolution) - 100 generations
 python main.py --algorithm neat --visualize
@@ -93,6 +100,38 @@ python main.py --algorithm dqn --eval --load models/dqn/final.pt --visualize
 python main.py --algorithm neat --visualize --record
 ```
 
+### Live Stream to Twitch / YouTube
+```bash
+# Stream to Twitch
+python main.py --algorithm dqn --visualize --stream-twitch YOUR_TWITCH_KEY
+
+# Stream to YouTube
+python main.py --algorithm ppo --visualize --stream-youtube YOUR_YOUTUBE_KEY
+
+# Simultaneous stream to both platforms
+python main.py --algorithm neat --visualize \
+    --stream-twitch YOUR_TWITCH_KEY \
+    --stream-youtube YOUR_YOUTUBE_KEY
+```
+
+Requires **ffmpeg** installed and on PATH (see [Streaming Requirements](#streaming-requirements) below).
+
+### Background Music
+```bash
+# Play music from the default assets/music directory
+python main.py --algorithm neat --visualize --music assets/music
+```
+
+Drop `.mp3`, `.ogg`, or `.wav` files into `assets/music/`. Tracks play in shuffled order and auto-advance. Use **M** to mute and **↑/↓** for volume during training.
+
+### Curriculum Learning (Whole Game)
+```bash
+# Train a single model across all 32 stages (World 1-1 through 8-4)
+python main.py --algorithm dqn --visualize --curriculum
+```
+
+The curriculum manager tracks performance per stage, advances when the agent consistently scores well, and periodically revisits earlier stages to prevent catastrophic forgetting.
+
 ### Train Without Dashboard (Faster)
 ```bash
 python main.py --algorithm dqn
@@ -102,8 +141,10 @@ python main.py --algorithm dqn
 
 | Key | Action |
 |-----|--------|
-| **SPACE** | Pause/Resume training display |
+| **SPACE** | Pause/Resume training (true pause — halts training thread) |
 | **S** | Save screenshot |
+| **M** | Mute/Unmute background music |
+| **↑ / ↓** | Volume up / down |
 | **ESC** | Stop training (model auto-saves) |
 
 Closing the window also triggers an auto-save.
@@ -139,13 +180,14 @@ Hyperparameters are stored in YAML/TXT config files:
 ```
 mario-ml/
   main.py                    # CLI entry point
+  launcher.py                # GUI launcher (tkinter)
   config/                    # Algorithm hyperparameters
   src/
     environment/             # Game environment + preprocessing
       mario_env.py           # Environment factory
       wrappers.py            # Frame skip, grayscale, resize, stack
     algorithms/              # ML implementations
-      base_trainer.py        # Shared interface (train, eval, save, load)
+      base_trainer.py        # Shared interface + true pause/resume
       neat/neat_trainer.py   # NEAT evolution
       ppo/ppo_trainer.py     # PPO via stable-baselines3
       dqn/
@@ -157,25 +199,39 @@ mario-ml/
       game_renderer.py       # Game frame display
       graph_panel.py         # Real-time matplotlib graphs
       metrics_tracker.py     # Metric collection + JSON export
-    streaming/               # Recording + streaming stubs
+    streaming/               # Recording + live streaming
       recording.py           # MP4 video recording
-      overlay_manager.py     # Stream compositing (stub)
-      frame_server.py        # Virtual camera (stub)
+      stream_manager.py      # ffmpeg RTMP streaming (Twitch/YouTube)
+      overlay_manager.py     # Stream overlay compositing (LIVE badge, stats)
+    audio/                   # Background music
+      music_manager.py       # Playlist, volume, mute via pygame.mixer
+    training/                # Training utilities
+      curriculum.py          # Curriculum learning across all 32 stages
+  assets/music/              # Drop .mp3/.ogg/.wav files here
   models/                    # Saved model checkpoints
   logs/                      # Training logs
   recordings/                # Recorded videos
+  tests/                     # pytest test suite
 ```
 
-## Streaming with OBS
+## Streaming Requirements
 
-The dashboard window is designed to be captured by OBS Studio:
+For built-in live streaming to Twitch/YouTube, install **ffmpeg**:
+
+- **Windows (winget):** `winget install ffmpeg`
+- **Windows (manual):** Download from https://ffmpeg.org/download.html and add to PATH
+- **Verify:** `ffmpeg -version`
+
+The stream outputs at 720p 30fps with the dashboard plus LIVE badge, algorithm info overlay, and stats ticker.
+
+### Alternative: OBS Studio
+
+You can also capture the dashboard window with OBS Studio:
 
 1. Open OBS Studio
 2. Add Source > Window Capture
 3. Select "Mario ML Dashboard" from the window list
 4. The 1400x800 window captures cleanly at any stream resolution
-
-The dashboard uses a dark theme with high contrast, optimized for stream visibility.
 
 ## Troubleshooting
 

@@ -23,6 +23,8 @@ from typing import Dict, Any, List, Optional
 
 import numpy as np
 
+MAX_METRICS_HISTORY = 10_000
+
 
 class MetricsTracker:
     """
@@ -98,6 +100,11 @@ class MetricsTracker:
                 self.metrics[name].append(numeric)
                 # Update best value tracking
                 self._update_best(name, numeric)
+
+        # Cap metric history to prevent unbounded memory growth
+        for key, values in self.metrics.items():
+            if len(values) > MAX_METRICS_HISTORY:
+                self.metrics[key] = values[-MAX_METRICS_HISTORY:]
 
     def _update_best(self, name: str, value: float) -> None:
         """

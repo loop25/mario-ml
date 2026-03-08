@@ -156,6 +156,35 @@ Examples:
              'Try 4 for a 2x2 grid, 8 for a 3x3 grid.',
     )
 
+    # Music
+    parser.add_argument(
+        '--music',
+        type=str,
+        default=None,
+        help='Path to music directory for background playback (default: assets/music/)',
+    )
+
+    # Streaming
+    parser.add_argument(
+        '--stream-twitch',
+        type=str,
+        default=None,
+        help='Twitch stream key for live streaming',
+    )
+    parser.add_argument(
+        '--stream-youtube',
+        type=str,
+        default=None,
+        help='YouTube stream key for live streaming',
+    )
+
+    # Curriculum learning
+    parser.add_argument(
+        '--curriculum',
+        action='store_true',
+        help='Enable curriculum learning for whole-game training (all 32 stages)',
+    )
+
     return parser.parse_args()
 
 
@@ -191,6 +220,16 @@ def main():
         args.visualize = True
         print('Note: --record requires --visualize. Enabling visualization.')
 
+    # Streaming requires visualization (captures the dashboard surface)
+    if (args.stream_twitch or args.stream_youtube) and not args.visualize:
+        args.visualize = True
+        print('Note: Streaming requires --visualize. Enabling visualization.')
+
+    # Warn about mutually exclusive stage progression options
+    if args.curriculum and args.next_stage:
+        print('WARNING: --next-stage is ignored when --curriculum is enabled.')
+        args.next_stage = False
+
     print(f'\n{"="*60}')
     print(f'  Super Mario Bros ML Training')
     print(f'  Algorithm: {args.algorithm.upper()}')
@@ -201,6 +240,8 @@ def main():
         print(f'  Parallel Envs: {num_envs}')
     if args.next_stage:
         print(f'  Stage Progression: ON (auto-advance after training)')
+    if args.curriculum:
+        print(f'  Curriculum Learning: ON (all 32 stages)')
     print(f'{"="*60}\n')
 
     # ================================================================
@@ -229,6 +270,68 @@ def main():
         print(f'Recording enabled. Output: recordings/')
 
     # ================================================================
+    # Music Manager
+    # ================================================================
+    music_manager = None
+    if not args.eval:  # No music in eval mode by default
+        music_dir = args.music or os.path.join(os.path.dirname(os.path.abspath(__file__)), 'assets', 'music')
+        if os.path.isdir(music_dir):
+            from src.audio.music_manager import MusicManager
+            music_manager = MusicManager(music_dir)
+            if music_manager.track_count > 0:
+                print(f'Loaded {music_manager.track_count} music track(s) from {music_dir}')
+            else:
+                music_manager = None
+
+    # ================================================================
+    # Streaming
+    # ================================================================
+    stream_manager = None
+    overlay_manager = None
+    twitch_key = args.stream_twitch
+    youtube_key = args.stream_youtube
+
+    if twitch_key or youtube_key:
+        from src.streaming.stream_manager import StreamManager
+        from src.streaming.overlay_manager import OverlayManager
+
+        # Get first music file for audio stream (if available)
+        audio_file = None
+        if music_manager and music_manager.playlist:
+            audio_file = music_manager.playlist[0]
+
+        stream_manager = StreamManager(
+            twitch_key=twitch_key,
+            youtube_key=youtube_key,
+            audio_file=audio_file,
+        )
+        overlay_manager = OverlayManager(resolution=(1280, 720))
+
+        if stream_manager.start():
+            print('[Stream] Streaming started successfully')
+        else:
+            print(f'[Stream] Failed to start: {stream_manager.error_message}')
+            stream_manager = None
+            overlay_manager = None
+
+    # ================================================================
+    # Curriculum Learning
+    # ================================================================
+    curriculum = None
+    if args.curriculum:
+        try:
+            from src.training.curriculum import CurriculumManager
+            curriculum = CurriculumManager(
+                start_world=args.world,
+                start_stage=args.stage,
+            )
+            print(f'Curriculum learning enabled: training across all 32 stages')
+            print(f'Starting at World {args.world}-{args.stage}')
+        except ImportError as e:
+            print(f'[Curriculum] ERROR: Could not load CurriculumManager: {e}')
+            print(f'[Curriculum] Falling back to standard training mode.')
+
+    # ================================================================
     # Create Visualization Dashboard
     # ================================================================
     dashboard = None
@@ -237,6 +340,9 @@ def main():
             algorithm=args.algorithm,
             num_envs=num_envs,
             recorder=recorder,
+            music_manager=music_manager,
+            stream_manager=stream_manager,
+            overlay_manager=overlay_manager,
         )
         print('Dashboard window opened.')
 
@@ -306,6 +412,9 @@ def main():
         _pg.event.clear()     # Discard any queued events (incl. stale QUIT)
         dashboard.update()    # Render initial dashboard frame
 
+    if music_manager:
+        music_manager.play()
+
     try:
         if args.eval:
             # Evaluation mode
@@ -313,6 +422,14 @@ def main():
             avg_reward = trainer.evaluate(num_episodes=10)
             print(f'\nFinal average reward: {avg_reward:.0f}')
         else:
+            # Register curriculum callback so report_episode is called
+            # per-episode (inside the trainer loop), not once per train() call.
+            if curriculum:
+                trainer.add_episode_callback(
+                    lambda reward, distance=0, completed=False:
+                        curriculum.report_episode(reward, distance, completed)
+                )
+
             # Training mode — train on current stage (and optionally advance)
             while True:
                 if args.algorithm == 'neat':
@@ -337,15 +454,28 @@ def main():
                     trainer.train(num_episodes=num_episodes)
 
                 # Check if we should advance to the next stage
-                if not args.next_stage or trainer._dashboard_closed:
+                if curriculum:
+                    # Curriculum callbacks have been reporting per-episode
+                    # data throughout training.  Now check if the sliding
+                    # window shows readiness to advance.
+                    if curriculum.should_advance():
+                        result = curriculum.advance()
+                        if result is None:
+                            print('\nAll 32 stages complete!')
+                            break
+                        next_w, next_s = result
+                        print(f'\nCurriculum advancing: -> World {next_w}-{next_s}')
+                    else:
+                        # Not ready to advance yet — keep training this stage
+                        continue
+                elif not args.next_stage or trainer._dashboard_closed:
                     break
-
-                result = next_world_stage(current_world, current_stage)
-                if result is None:
-                    print('\nAll stages complete! (8-4 reached)')
-                    break
-
-                next_w, next_s = result
+                else:
+                    result = next_world_stage(current_world, current_stage)
+                    if result is None:
+                        print('\nAll stages complete! (8-4 reached)')
+                        break
+                    next_w, next_s = result
                 print(f'\n{"="*60}')
                 print(f'  ADVANCING: World {current_world}-{current_stage} '
                       f'→ World {next_w}-{next_s}')
@@ -446,6 +576,8 @@ def main():
         pass
     finally:
         # Cleanup
+        if stream_manager:
+            stream_manager.stop()
         if recorder:
             recorder.stop()
         if dashboard:

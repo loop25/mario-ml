@@ -108,6 +108,9 @@ class Dashboard:
         graph_update_interval: int = 1,
         fps_cap: int = 60,
         recorder=None,
+        music_manager=None,
+        stream_manager=None,
+        overlay_manager=None,
     ):
         # Initialize pygame
         pygame.init()
@@ -119,6 +122,9 @@ class Dashboard:
         self.graph_update_interval = graph_update_interval
         self.fps_cap = fps_cap
         self.recorder = recorder
+        self.music_manager = music_manager
+        self.stream_manager = stream_manager
+        self.overlay_manager = overlay_manager
         self.metrics = MetricsTracker()
 
         # Compute initial layout dimensions from default size
@@ -278,6 +284,25 @@ class Dashboard:
             )
 
     # ========================================================================
+    # Streaming Helper
+    # ========================================================================
+
+    def _send_stream_frame(self) -> None:
+        """Capture the current screen and send it to the streaming pipeline."""
+        if not self.stream_manager or not self.stream_manager.is_streaming:
+            return
+        surface = self.screen.copy()
+        stream_frame = pygame.surfarray.array3d(surface)
+        stream_frame = np.transpose(stream_frame, (1, 0, 2))  # (H, W, 3)
+        if self.overlay_manager:
+            stream_frame = self.overlay_manager.compose(
+                stream_frame,
+                is_live=True,
+                algorithm=self.algorithm,
+            )
+        self.stream_manager.send_frame(stream_frame)
+
+    # ========================================================================
     # Main Update Methods
     # ========================================================================
 
@@ -397,6 +422,9 @@ class Dashboard:
         if self.recorder is not None:
             self.recorder.capture_frame(self.screen)
 
+        # Send frame to stream if active
+        self._send_stream_frame()
+
         # Flip the display buffer
         pygame.display.flip()
 
@@ -404,7 +432,7 @@ class Dashboard:
         if is_graph_update:
             self.clock.tick(self.fps_cap)
         else:
-            self.clock.tick(0)
+            self.clock.tick(self.fps_cap)
 
     def update_grid(
         self,
@@ -503,12 +531,15 @@ class Dashboard:
         if self.recorder is not None:
             self.recorder.capture_frame(self.screen)
 
+        # Send frame to stream if active
+        self._send_stream_frame()
+
         pygame.display.flip()
 
         if is_graph_update:
             self.clock.tick(self.fps_cap)
         else:
-            self.clock.tick(0)
+            self.clock.tick(self.fps_cap)
 
     # ========================================================================
     # Event Handling
@@ -565,6 +596,10 @@ class Dashboard:
                 self._pending_resize = (w, h)
                 self._resize_timer = pygame.time.get_ticks()
 
+            elif event.type == pygame.USEREVENT + 99:
+                if self.music_manager:
+                    self.music_manager.handle_music_end_event()
+
             elif event.type == pygame.KEYDOWN:
                 if event.key == pygame.K_ESCAPE:
                     return False
@@ -579,6 +614,15 @@ class Dashboard:
                         print(f'Screenshot saved: {filename}')
                     except Exception as e:
                         print(f'Screenshot failed: {e}')
+                elif event.key == pygame.K_m:
+                    if self.music_manager:
+                        self.music_manager.toggle_mute()
+                elif event.key == pygame.K_UP:
+                    if self.music_manager:
+                        self.music_manager.volume_up()
+                elif event.key == pygame.K_DOWN:
+                    if self.music_manager:
+                        self.music_manager.volume_down()
         return True
 
     def get_surface(self) -> pygame.Surface:
@@ -723,6 +767,18 @@ class Dashboard:
             self._last_fps_time = now
 
     def close(self) -> None:
-        """Clean up pygame and matplotlib resources."""
-        self.graph_panel.cleanup()
-        pygame.quit()
+        """Clean up pygame and matplotlib resources.
+
+        Safe to call multiple times — guarded to avoid double-cleanup.
+        """
+        if getattr(self, '_closed', False):
+            return
+        self._closed = True
+        try:
+            self.graph_panel.cleanup()
+        except Exception:
+            pass
+        try:
+            pygame.quit()
+        except Exception:
+            pass

@@ -3,6 +3,12 @@
 # ============================================================================
 # Python 3.11 required (3.13 not compatible with gym-super-mario-bros)
 # Install: pip install -r requirements.txt
+#
+# GPU ACCELERATION (recommended):
+#   For NVIDIA GPUs, install PyTorch with CUDA instead of the default CPU build:
+#     pip install torch torchvision --index-url https://download.pytorch.org/whl/cu128
+#   RTX 50-series (Blackwell/sm_120) requires cu128 or newer.
+#   See https://pytorch.org/get-started/locally/ for other CUDA versions.
 # ============================================================================
 
 # --- Game Environment ---
@@ -12,8 +18,8 @@ nes-py==8.2.1                  # NES emulator backend for gym-super-mario-bros
 
 # --- Machine Learning Core ---
 numpy>=1.24,<2.0              # Numerical computing (numpy 2.0 has breaking changes)
-torch>=2.0,<2.4               # PyTorch - neural networks for DQN
-torchvision>=0.15,<0.19       # PyTorch vision utilities
+torch>=2.0                     # PyTorch - DQN/PPO neural networks (install CUDA build for GPU)
+torchvision>=0.15              # PyTorch vision utilities
 
 # --- Reinforcement Learning ---
 stable-baselines3>=2.0,<2.4   # PPO implementation (includes CNN policies)

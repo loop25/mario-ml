@@ -34,6 +34,25 @@ MAIN_SCRIPT = os.path.join(PROJECT_ROOT, "main.py")
 MODELS_DIR = os.path.join(PROJECT_ROOT, "models")
 RECORDINGS_DIR = os.path.join(PROJECT_ROOT, "recordings")
 
+
+def _find_venv_python() -> str:
+    """Return the path to the venv's Python, falling back to sys.executable.
+
+    This lets the launcher work correctly even when launched with the
+    system Python (e.g. by double-clicking).  We look for the venv
+    directory that lives alongside this script.
+    """
+    if sys.platform == "win32":
+        venv_python = os.path.join(PROJECT_ROOT, "venv", "Scripts", "python.exe")
+    else:
+        venv_python = os.path.join(PROJECT_ROOT, "venv", "bin", "python")
+    if os.path.isfile(venv_python):
+        return venv_python
+    return sys.executable
+
+
+VENV_PYTHON = _find_venv_python()
+
 # ---------------------------------------------------------------------------
 # Color palette — dark theme matching the pygame dashboard aesthetic
 # ---------------------------------------------------------------------------
@@ -104,8 +123,20 @@ class MarioLauncher:
         self.record_var = tk.BooleanVar(value=False)
         self.eval_var = tk.BooleanVar(value=False)
         self.next_stage_var = tk.BooleanVar(value=False)
+        self.curriculum_var = tk.BooleanVar(value=False)
         self.num_envs_var = tk.StringVar(value="1")
         self.model_path_var = tk.StringVar(value="")
+
+        # Streaming
+        self.twitch_key_var = tk.StringVar()
+        self.youtube_key_var = tk.StringVar()
+        self.stream_var = tk.BooleanVar(value=False)
+
+        # Music
+        self.music_var = tk.BooleanVar(value=True)
+        self.music_dir_var = tk.StringVar(
+            value=os.path.join(PROJECT_ROOT, 'assets', 'music')
+        )
 
         # Build all GUI sections
         self._build_header()
@@ -113,6 +144,8 @@ class MarioLauncher:
         self._build_world_stage()
         self._build_duration()
         self._build_options()
+        self._build_streaming_section()
+        self._build_music_section()
         self._build_model_loader()
         self._build_start_button()
         self._build_status_bar()
@@ -387,6 +420,21 @@ class MarioLauncher:
         )
         stage_cb.pack(anchor="w")
 
+        # Curriculum (whole game) checkbox
+        curriculum_cb = tk.Checkbutton(
+            section,
+            text="Whole Game  (curriculum learning across all 32 stages)",
+            variable=self.curriculum_var,
+            font=("Segoe UI", 10),
+            fg=TEXT_PRIMARY,
+            bg=BG_DARK,
+            selectcolor=BG_MEDIUM,
+            activebackground=BG_DARK,
+            activeforeground=TEXT_PRIMARY,
+            cursor="hand2",
+        )
+        curriculum_cb.pack(anchor="w")
+
         # Parallel environments selector
         envs_frame = tk.Frame(section, bg=BG_DARK)
         envs_frame.pack(anchor="w", pady=(6, 0))
@@ -419,6 +467,87 @@ class MarioLauncher:
     def _on_eval_toggle(self):
         """Update UI when Evaluation Mode is toggled."""
         self._update_start_button_text()
+
+    def _build_streaming_section(self):
+        """Build the streaming configuration section."""
+        section = tk.LabelFrame(
+            self.root,
+            text="  Streaming  ",
+            font=("Segoe UI", 10),
+            fg=TEXT_DIM,
+            bg=BG_DARK,
+            bd=1,
+            relief="groove",
+            highlightbackground=BORDER_COLOR,
+            padx=15,
+            pady=8,
+        )
+        section.pack(fill="x", padx=25, pady=8)
+
+        # Enable streaming checkbox
+        stream_cb = tk.Checkbutton(
+            section,
+            text="Enable Live Streaming",
+            variable=self.stream_var,
+            font=("Segoe UI", 10),
+            fg=ACCENT_RED,
+            bg=BG_DARK,
+            selectcolor=BG_MEDIUM,
+            activebackground=BG_DARK,
+            activeforeground=ACCENT_RED,
+            cursor="hand2",
+        )
+        stream_cb.pack(anchor="w")
+
+        # Twitch key
+        tk.Label(section, text="Twitch Stream Key:", font=("Segoe UI", 9),
+                 fg=TEXT_DIM, bg=BG_DARK).pack(anchor="w", pady=(5, 0))
+        twitch_entry = tk.Entry(
+            section, textvariable=self.twitch_key_var, show="*",
+            font=("Segoe UI", 10), bg=BG_MEDIUM, fg=TEXT_PRIMARY,
+            insertbackground=TEXT_PRIMARY, relief="flat",
+        )
+        twitch_entry.pack(fill="x", pady=2)
+
+        # YouTube key
+        tk.Label(section, text="YouTube Stream Key:", font=("Segoe UI", 9),
+                 fg=TEXT_DIM, bg=BG_DARK).pack(anchor="w", pady=(5, 0))
+        youtube_entry = tk.Entry(
+            section, textvariable=self.youtube_key_var, show="*",
+            font=("Segoe UI", 10), bg=BG_MEDIUM, fg=TEXT_PRIMARY,
+            insertbackground=TEXT_PRIMARY, relief="flat",
+        )
+        youtube_entry.pack(fill="x", pady=2)
+
+    def _build_music_section(self):
+        """Build the music configuration section."""
+        section = tk.LabelFrame(
+            self.root,
+            text="  Music  ",
+            font=("Segoe UI", 10),
+            fg=TEXT_DIM,
+            bg=BG_DARK,
+            bd=1,
+            relief="groove",
+            highlightbackground=BORDER_COLOR,
+            padx=15,
+            pady=8,
+        )
+        section.pack(fill="x", padx=25, pady=8)
+
+        music_cb = tk.Checkbutton(
+            section,
+            text="Play Background Music",
+            variable=self.music_var,
+            font=("Segoe UI", 10),
+            fg=TEXT_PRIMARY,
+            bg=BG_DARK,
+            selectcolor=BG_MEDIUM,
+            activebackground=BG_DARK,
+            activeforeground=TEXT_PRIMARY,
+            cursor="hand2",
+        )
+        music_cb.pack(anchor="w")
 
     def _build_model_loader(self):
         """File browser for loading a saved model."""
@@ -639,9 +768,9 @@ class MarioLauncher:
             self._set_status("Please load a model for evaluation.", ACCENT_RED)
             return
 
-        # Build the command
+        # Build the command — use venv Python so all deps are available
         cmd = [
-            sys.executable,
+            VENV_PYTHON,
             MAIN_SCRIPT,
             "--algorithm", algo,
             "--world", world,
@@ -663,6 +792,10 @@ class MarioLauncher:
         # Add stage progression flag
         if self.next_stage_var.get() and not is_eval:
             cmd.append("--next-stage")
+
+        # Add curriculum flag
+        if self.curriculum_var.get() and not is_eval:
+            cmd.append("--curriculum")
 
         # Add parallel environments
         num_envs = self.num_envs_var.get()
@@ -686,6 +819,28 @@ class MarioLauncher:
             except ValueError:
                 self._set_status("Invalid number for duration.", ACCENT_RED)
                 return
+
+        # Add streaming flags
+        if self.stream_var.get():
+            twitch_key = self.twitch_key_var.get().strip()
+            youtube_key = self.youtube_key_var.get().strip()
+            if not twitch_key and not youtube_key:
+                self._set_status(
+                    "Streaming enabled but no keys provided.", ACCENT_RED
+                )
+                return
+            if twitch_key:
+                cmd.extend(["--stream-twitch", twitch_key])
+            if youtube_key:
+                cmd.extend(["--stream-youtube", youtube_key])
+
+        # Add music flag
+        if self.music_var.get():
+            music_dir = self.music_dir_var.get().strip()
+            if not music_dir or not os.path.isdir(music_dir):
+                print(f'[Music] Directory not found: {music_dir!r}, skipping music')
+            else:
+                cmd.extend(["--music", music_dir])
 
         # Launch the subprocess
         try:

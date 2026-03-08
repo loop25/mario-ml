@@ -26,6 +26,7 @@ Usage:
     trainer.save_checkpoint('models/ppo/ppo_model')
 """
 
+import json
 import os
 import yaml
 import numpy as np
@@ -95,6 +96,10 @@ class DashboardCallback(BaseCallback):
         Returns:
             bool: True to continue training, False to stop.
         """
+        # Check for pause (blocks this thread until resumed)
+        if not self.trainer.check_pause():
+            return False  # Abort training
+
         # If dashboard was already closed, stop training immediately
         if self.trainer._dashboard_closed:
             return False
@@ -211,6 +216,13 @@ class DashboardCallback(BaseCallback):
             self.trainer.best_reward = reward
         if distance > self.trainer.best_distance:
             self.trainer.best_distance = distance
+
+        # Notify episode callbacks (curriculum learning, etc.)
+        self.trainer._fire_episode_complete(
+            reward=reward,
+            distance=distance,
+            completed=self._env_stage_completed[env_index],
+        )
 
         # Update dashboard
         if self.dashboard:
@@ -352,11 +364,12 @@ class PPOTrainer(BaseTrainer):
     def _select_device() -> str:
         """Return ``'cuda'`` if CUDA works, otherwise ``'cpu'``.
 
-        Some GPUs report CUDA available but fail on actual kernel
-        execution (e.g. RTX 5070 Blackwell/sm_120 with older CUDA).
+        Runs a quick smoke test to verify GPU kernels actually work.
+        Some GPUs report CUDA available but fail on execution with
+        older CUDA toolkit versions.
 
-        Fix: Install PyTorch nightly with CUDA 12.8+:
-            pip install --pre torch torchvision torchaudio --index-url https://download.pytorch.org/whl/nightly/cu128
+        Fix: Install PyTorch with CUDA 12.8+:
+            pip install torch torchvision --index-url https://download.pytorch.org/whl/cu128
         """
         try:
             import torch
@@ -366,14 +379,16 @@ class PPOTrainer(BaseTrainer):
                 del a
                 torch.cuda.empty_cache()
                 gpu = torch.cuda.get_device_name(0)
-                print(f'PPO using device: cuda ({gpu})')
+                vram = torch.cuda.get_device_properties(0).total_mem
+                vram_gb = round(vram / 1024**3, 1)
+                print(f'PPO using device: cuda ({gpu}, {vram_gb}GB VRAM)')
                 return 'cuda'
         except (RuntimeError, Exception):
             pass
         print('PPO using device: cpu')
-        print('  Tip: RTX 50-series needs PyTorch nightly with cu128+')
-        print('  Run: pip install --pre torch torchvision torchaudio '
-              '--index-url https://download.pytorch.org/whl/nightly/cu128')
+        print('  Tip: Install CUDA-enabled PyTorch for GPU acceleration:')
+        print('  pip install torch torchvision '
+              '--index-url https://download.pytorch.org/whl/cu128')
         return 'cpu'
 
     def _wrap_env_for_sb3(self, env, num_envs: int = 1):
@@ -576,6 +591,10 @@ class PPOTrainer(BaseTrainer):
         """
         Load PPO model from checkpoint.
 
+        Restores model weights via SB3 and training state (episode count,
+        best reward, best distance) from the metadata.json saved alongside
+        the checkpoint.
+
         Args:
             path: Path to the checkpoint file (.zip).
 
@@ -594,3 +613,19 @@ class PPOTrainer(BaseTrainer):
         actual_path = path_with_ext if os.path.exists(path_with_ext) else path
         self.model = PPO.load(actual_path, env=self.vec_env)
         print(f'Loaded PPO model from: {actual_path}')
+
+        # Restore training state from metadata.json (saved by BaseTrainer)
+        checkpoint_dir = os.path.dirname(actual_path) or '.'
+        metadata_path = os.path.join(checkpoint_dir, 'metadata.json')
+        if os.path.exists(metadata_path):
+            try:
+                with open(metadata_path, 'r') as f:
+                    meta = json.load(f)
+                self.episode_count = meta.get('episode', self.episode_count)
+                self.best_reward = meta.get('best_reward', self.best_reward)
+                self.best_distance = meta.get('best_distance', self.best_distance)
+                print(f'  Restored state: ep={self.episode_count}, '
+                      f'best_reward={self.best_reward:.1f}, '
+                      f'best_dist={self.best_distance}')
+            except (json.JSONDecodeError, KeyError) as e:
+                print(f'  Warning: Could not restore metadata: {e}')

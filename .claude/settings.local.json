@@ -8,7 +8,27 @@
       "Bash(git checkout -b feature/streaming-music-optimization)",
       "Bash(git init)",
       "Bash(git add -A)",
-      "Bash(git commit -m \"Initial commit: mario-ml project with NEAT, PPO, DQN trainers\")"
+      "Bash(git commit -m \"Initial commit: mario-ml project with NEAT, PPO, DQN trainers\")",
+      "Bash(python -m pytest --version)",
+      "Bash(./venv/Scripts/python.exe -m pytest --version)",
+      "Bash(./venv/Scripts/pip.exe install pytest)",
+      "Bash(./venv/Scripts/python.exe -m pytest --co)",
+      "Bash(git add pytest.ini tests/)",
+      "Bash(git commit:*)",
+      "Bash(venv/Scripts/python -m pytest tests/test_pause_resume.py -v)",
+      "Bash(git add src/algorithms/neat/neat_trainer.py src/algorithms/dqn/dqn_trainer.py src/algorithms/ppo/ppo_trainer.py)",
+      "Bash(venv/Scripts/python -m pytest tests/test_music_manager.py -v)",
+      "Bash(echo \"EXIT: $?\")",
+      "Bash(venv/Scripts/python -m pytest tests/test_stream_manager.py -v)",
+      "Bash(git add src/streaming/stream_manager.py tests/test_stream_manager.py)",
+      "Bash(git add src/audio/ assets/music/README.txt tests/test_music_manager.py)",
+      "Bash(venv/Scripts/python -m pytest tests/test_curriculum.py -v)",
+      "Bash(venv/Scripts/python -m pytest tests/test_overlay_manager.py -v)",
+      "Bash(git add src/training/ tests/test_curriculum.py)",
+      "Bash(git add src/streaming/overlay_manager.py tests/test_overlay_manager.py)",
+      "Bash(git add src/visualization/dashboard.py main.py)",
+      "Bash(git add main.py config/streaming_config.yaml src/visualization/dashboard.py)",
+      "Bash(python -m pytest tests/ -v)"
     ]
   }
 }

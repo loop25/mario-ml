@@ -32,6 +32,7 @@ import sys
 import json
 import time
 import signal
+import threading
 from abc import ABC, abstractmethod
 from typing import Dict, Any, Optional
 
@@ -94,6 +95,15 @@ class BaseTrainer(ABC):
         self.start_time = time.time()
         self._dashboard_closed = False  # Prevents double-save on window close
 
+        # Pause/resume state
+        self._training_paused = False
+        self._pause_event = threading.Event()
+        self._pause_event.set()  # Not paused initially
+
+        # Episode callbacks — used by curriculum learning and other
+        # cross-cutting concerns that need per-episode notifications.
+        self._episode_callbacks = []
+
         # Checkpoint settings (can be overridden in config)
         self.checkpoint_interval = config.get('save_freq', 50)
 
@@ -101,6 +111,86 @@ class BaseTrainer(ABC):
         # This ensures models are saved when the user presses Ctrl+C
         self._original_sigint = signal.getsignal(signal.SIGINT)
         signal.signal(signal.SIGINT, self._handle_shutdown)
+
+    @property
+    def training_paused(self):
+        """Whether training is currently paused."""
+        return self._training_paused
+
+    @training_paused.setter
+    def training_paused(self, value: bool):
+        self._training_paused = value
+        if value:
+            self._pause_event.clear()
+            print('\n⏸  Training PAUSED (press SPACE to resume)')
+        else:
+            self._pause_event.set()
+            print('\n▶  Training RESUMED')
+
+    def check_pause(self) -> bool:
+        """
+        Call this at the top of each training step/episode.
+
+        Blocks the calling thread while training_paused is True.
+        Returns True to continue training, False if dashboard was closed.
+        """
+        if not self._training_paused:
+            return True
+
+        # Block until resumed (check every 0.1s for dashboard close)
+        while self._training_paused:
+            if self._pause_event.wait(timeout=0.1):
+                return True
+            # While waiting, keep processing dashboard events
+            if self.visualizer and not self.visualizer.handle_events():
+                self._dashboard_closed = True
+                print('\nDashboard closed. Saving model...')
+                self.visualizer.close()
+                self._save_on_exit()
+                return False
+            if self.visualizer:
+                self.visualizer.update()
+        return True
+
+    def add_episode_callback(self, callback) -> None:
+        """
+        Register a callback to be invoked after every episode completes.
+
+        Callbacks receive keyword arguments:
+            reward (float): Total episode reward.
+            distance (int): Max x-position reached.
+            completed (bool): Whether the stage was completed.
+
+        Used by CurriculumManager to receive per-episode data for
+        sliding-window advancement decisions.
+
+        Args:
+            callback: Callable(reward, distance, completed) -> None.
+        """
+        self._episode_callbacks.append(callback)
+
+    def _fire_episode_complete(
+        self,
+        reward: float,
+        distance: int = 0,
+        completed: bool = False,
+    ) -> None:
+        """
+        Notify all registered callbacks that an episode has finished.
+
+        Called by each trainer subclass at the point where an episode
+        (or genome evaluation, for NEAT) completes.
+
+        Args:
+            reward: Total episode reward.
+            distance: Max x-position reached this episode.
+            completed: Whether the stage was cleared.
+        """
+        for cb in self._episode_callbacks:
+            try:
+                cb(reward=reward, distance=distance, completed=completed)
+            except Exception as e:
+                print(f'  Warning: episode callback error: {e}')
 
     @abstractmethod
     def train(self, num_episodes: int) -> None:
@@ -199,21 +289,17 @@ class BaseTrainer(ABC):
 
         # Check for user events (close window, pause, etc.)
         if not self.visualizer.handle_events():
-            # User closed the window — trigger graceful shutdown (once)
+            # User closed the window — close it immediately so it
+            # doesn't appear frozen while the model saves.
             self._dashboard_closed = True
             print('\nDashboard closed. Saving model...')
+            self.visualizer.close()
             self._save_on_exit()
             return False
 
-        # Handle pause state
-        while self.visualizer.is_paused:
-            if not self.visualizer.handle_events():
-                self._dashboard_closed = True
-                print('\nDashboard closed. Saving model...')
-                self._save_on_exit()
-                return False
-            self.visualizer.update()  # Keep rendering while paused
-            time.sleep(0.1)
+        # Sync pause state from dashboard to trainer
+        if self.visualizer.is_paused != self._training_paused:
+            self.training_paused = self.visualizer.is_paused
 
         return True
 
@@ -258,18 +344,13 @@ class BaseTrainer(ABC):
         if not self.visualizer.handle_events():
             self._dashboard_closed = True
             print('\nDashboard closed. Saving model...')
+            self.visualizer.close()
             self._save_on_exit()
             return False
 
-        # Handle pause
-        while self.visualizer.is_paused:
-            if not self.visualizer.handle_events():
-                self._dashboard_closed = True
-                print('\nDashboard closed. Saving model...')
-                self._save_on_exit()
-                return False
-            self.visualizer.update()
-            time.sleep(0.1)
+        # Sync pause state from dashboard to trainer
+        if self.visualizer.is_paused != self._training_paused:
+            self.training_paused = self.visualizer.is_paused
 
         return True
 
