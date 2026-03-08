@@ -2,6 +2,8 @@
 import numpy as np
 import pytest
 
+cv2 = pytest.importorskip('cv2', reason='cv2 (opencv-python) not installed')
+
 
 def test_compose_adds_live_badge():
     from src.streaming.overlay_manager import OverlayManager

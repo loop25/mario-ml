@@ -26,6 +26,7 @@ Usage:
     trainer.save_checkpoint('models/ppo/ppo_model')
 """
 
+import json
 import os
 import yaml
 import numpy as np
@@ -587,6 +588,10 @@ class PPOTrainer(BaseTrainer):
         """
         Load PPO model from checkpoint.
 
+        Restores model weights via SB3 and training state (episode count,
+        best reward, best distance) from the metadata.json saved alongside
+        the checkpoint.
+
         Args:
             path: Path to the checkpoint file (.zip).
 
@@ -605,3 +610,19 @@ class PPOTrainer(BaseTrainer):
         actual_path = path_with_ext if os.path.exists(path_with_ext) else path
         self.model = PPO.load(actual_path, env=self.vec_env)
         print(f'Loaded PPO model from: {actual_path}')
+
+        # Restore training state from metadata.json (saved by BaseTrainer)
+        checkpoint_dir = os.path.dirname(actual_path) or '.'
+        metadata_path = os.path.join(checkpoint_dir, 'metadata.json')
+        if os.path.exists(metadata_path):
+            try:
+                with open(metadata_path, 'r') as f:
+                    meta = json.load(f)
+                self.episode_count = meta.get('episode', self.episode_count)
+                self.best_reward = meta.get('best_reward', self.best_reward)
+                self.best_distance = meta.get('best_distance', self.best_distance)
+                print(f'  Restored state: ep={self.episode_count}, '
+                      f'best_reward={self.best_reward:.1f}, '
+                      f'best_dist={self.best_distance}')
+            except (json.JSONDecodeError, KeyError) as e:
+                print(f'  Warning: Could not restore metadata: {e}')

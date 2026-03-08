@@ -5,6 +5,7 @@ Sends raw video frames and audio to Twitch and/or YouTube simultaneously
 using ffmpeg's tee muxer. Requires ffmpeg installed and on PATH.
 """
 import os
+import re
 import shutil
 import subprocess
 import threading
@@ -81,7 +82,7 @@ class StreamManager:
             '-tune', 'zerolatency',
             '-b:v', self.video_bitrate,
             '-maxrate', self.video_bitrate,
-            '-bufsize', str(int(self.video_bitrate.replace('k', '')) * 2) + 'k',
+            '-bufsize', self._calc_bufsize(self.video_bitrate),
             '-pix_fmt', 'yuv420p',
             '-g', str(self.fps * 2),
         ]
@@ -103,6 +104,35 @@ class StreamManager:
             cmd += ['-f', 'tee', '|'.join(destinations)]
 
         return cmd
+
+    @staticmethod
+    def _calc_bufsize(bitrate: str) -> str:
+        """
+        Calculate bufsize as 2x the video bitrate.
+
+        Handles formats like '4500k', '4500K', '4.5M', '4500' (plain numeric).
+        Returns an ffmpeg-compatible bitrate string (e.g. '9000k').
+
+        Args:
+            bitrate: Video bitrate string (e.g. '4500k').
+
+        Returns:
+            Bufsize string at 2x the input bitrate.
+        """
+        match = re.match(r'^([\d.]+)\s*([kKmM]?)$', bitrate.strip())
+        if not match:
+            # Fallback: pass bitrate through unchanged (ffmpeg will validate)
+            return bitrate
+        value = float(match.group(1))
+        suffix = match.group(2).lower()
+        if suffix == 'm':
+            # Convert megabits to kilobits for consistency
+            value_k = int(value * 1000)
+        elif suffix == 'k' or suffix == '':
+            value_k = int(value)
+        else:
+            value_k = int(value)
+        return f'{value_k * 2}k'
 
     def start(self) -> bool:
         if self.is_streaming:

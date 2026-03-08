@@ -618,9 +618,11 @@ class DQNTrainer(BaseTrainer):
                         print(f'  *** STAGE COMPLETED! (Episode {episodes_completed}, '
                               f'Env {env_idx}) ***')
 
+                    # Calculate avg loss before any reset
+                    avg_loss = total_loss / max(loss_count, 1)
+
                     # Print progress
                     if episodes_completed % 10 == 0:
-                        avg_loss = total_loss / max(loss_count, 1)
                         print(
                             f'  Ep {episodes_completed}: '
                             f'Reward={ep_reward:.0f}, '
@@ -634,7 +636,6 @@ class DQNTrainer(BaseTrainer):
 
                     # Update dashboard with metrics
                     if self.visualizer:
-                        avg_loss = total_loss / max(loss_count, 1) if loss_count > 0 else 0
                         metrics = {
                             'episode': episodes_completed,
                             'reward': ep_reward,

@@ -49,3 +49,32 @@ def test_no_keys_returns_false():
     from src.streaming.stream_manager import StreamManager
     sm = StreamManager()
     assert sm.start() is False
+
+
+class TestCalcBufsize:
+    """Tests for the robust bitrate parser used for ffmpeg -bufsize."""
+
+    def test_standard_lowercase_k(self):
+        from src.streaming.stream_manager import StreamManager
+        assert StreamManager._calc_bufsize('4500k') == '9000k'
+
+    def test_uppercase_K(self):
+        from src.streaming.stream_manager import StreamManager
+        assert StreamManager._calc_bufsize('4500K') == '9000k'
+
+    def test_megabits(self):
+        from src.streaming.stream_manager import StreamManager
+        assert StreamManager._calc_bufsize('4.5M') == '9000k'
+
+    def test_plain_numeric(self):
+        from src.streaming.stream_manager import StreamManager
+        assert StreamManager._calc_bufsize('4500') == '9000k'
+
+    def test_fallback_on_invalid(self):
+        from src.streaming.stream_manager import StreamManager
+        # Invalid format should return input unchanged
+        assert StreamManager._calc_bufsize('invalid') == 'invalid'
+
+    def test_small_value(self):
+        from src.streaming.stream_manager import StreamManager
+        assert StreamManager._calc_bufsize('1000k') == '2000k'

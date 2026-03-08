@@ -432,7 +432,7 @@ class Dashboard:
         if is_graph_update:
             self.clock.tick(self.fps_cap)
         else:
-            self.clock.tick(0)
+            self.clock.tick(self.fps_cap)
 
     def update_grid(
         self,
@@ -539,7 +539,7 @@ class Dashboard:
         if is_graph_update:
             self.clock.tick(self.fps_cap)
         else:
-            self.clock.tick(0)
+            self.clock.tick(self.fps_cap)
 
     # ========================================================================
     # Event Handling
