@@ -1,0 +1,62 @@
+"""Connect Four adapter for the plugin registry."""
+from typing import Tuple
+
+import gym
+
+from games.base_adapter import BaseGameAdapter
+from games.reward_config import (
+    StandardMetrics,
+    RewardConfig,
+    ActionSpaceInfo,
+)
+from games.builtin.connect4.game import ConnectFourEnv
+
+
+class ConnectFourAdapter(BaseGameAdapter):
+    """Adapter for the built-in Connect Four game."""
+
+    @property
+    def name(self) -> str:
+        return 'Connect Four'
+
+    @property
+    def game_id(self) -> str:
+        return 'connect4'
+
+    @property
+    def category(self) -> str:
+        return 'board'
+
+    @property
+    def description(self) -> str:
+        return 'Drop pieces to get four in a row — vertical, horizontal, or diagonal.'
+
+    def create_env(self, **kwargs) -> gym.Env:
+        return ConnectFourEnv()
+
+    def get_action_space_info(self) -> ActionSpaceInfo:
+        return ActionSpaceInfo(
+            num_actions=7,
+            action_labels=[f'Col {i+1}' for i in range(7)],
+        )
+
+    def get_observation_shape(self) -> Tuple[int, ...]:
+        return (84, 84, 1)
+
+    def extract_metrics(self, info: dict, episode_time: float) -> StandardMetrics:
+        return StandardMetrics(
+            progress=info.get('pieces_played', 0) / 42,
+            score=float(1 if info.get('winner') == 1 else 0),
+            completed=info.get('winner', 0) == 1,
+            time_elapsed=episode_time,
+        )
+
+    def get_reward_config(self) -> RewardConfig:
+        return RewardConfig(
+            time_penalty_per_second=0.0,   # Board game — thinking is fine
+            completion_bonus=50.0,
+            death_penalty=-10.0,
+            idle_penalty_per_second=0.0,
+            speed_bonus_multiplier=0.0,
+            par_time_seconds=300.0,
+        )
