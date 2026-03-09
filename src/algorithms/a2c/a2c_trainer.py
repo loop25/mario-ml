@@ -110,19 +110,22 @@ class A2CTrainer(BaseTrainer):
             vec_env = DummyVecEnv([lambda: self.env])
         vec_env = VecTransposeImage(vec_env)
 
-        # Create A2C model
-        self.model = A2C(
-            'CnnPolicy',
-            vec_env,
-            n_steps=self.config.get('n_steps', 5),
-            learning_rate=self.config.get('learning_rate', 0.0007),
-            gamma=self.config.get('gamma', 0.99),
-            gae_lambda=self.config.get('gae_lambda', 1.0),
-            ent_coef=self.config.get('ent_coef', 0.01),
-            vf_coef=self.config.get('vf_coef', 0.5),
-            max_grad_norm=self.config.get('max_grad_norm', 0.5),
-            verbose=0,
-        )
+        # Create or reuse A2C model (reuse when resuming from checkpoint)
+        if self.model is None:
+            self.model = A2C(
+                'CnnPolicy',
+                vec_env,
+                n_steps=self.config.get('n_steps', 5),
+                learning_rate=self.config.get('learning_rate', 0.0007),
+                gamma=self.config.get('gamma', 0.99),
+                gae_lambda=self.config.get('gae_lambda', 1.0),
+                ent_coef=self.config.get('ent_coef', 0.01),
+                vf_coef=self.config.get('vf_coef', 0.5),
+                max_grad_norm=self.config.get('max_grad_norm', 0.5),
+                verbose=0,
+            )
+        else:
+            self.model.set_env(vec_env)
 
         callback = A2CDashboardCallback(self.visualizer, self)
         self.model.learn(total_timesteps=total_timesteps, callback=callback)

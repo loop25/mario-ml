@@ -44,6 +44,7 @@ Environment:
 import argparse
 import os
 import sys
+import json
 import yaml
 
 # Add project root to Python path so imports work from any directory
@@ -218,6 +219,37 @@ def next_world_stage(world: int, stage: int):
         return None  # All stages complete!
 
 
+def find_resume_checkpoint(algo_name, save_dir='models'):
+    """Find the latest final checkpoint for auto-resume.
+
+    Checks models/{algo_name}/ for a metadata.json (written by
+    BaseTrainer._save_metadata) and a corresponding final checkpoint
+    file.  Returns (checkpoint_path, metadata_dict) or (None, None).
+    """
+    algo_dir = os.path.join(save_dir, algo_name)
+    metadata_path = os.path.join(algo_dir, 'metadata.json')
+    if not os.path.isfile(metadata_path):
+        return None, None
+
+    try:
+        with open(metadata_path, 'r') as f:
+            metadata = json.load(f)
+    except (json.JSONDecodeError, OSError):
+        return None, None
+
+    # Each algorithm saves its final model with a different extension.
+    candidates = [
+        os.path.join(algo_dir, 'final.zip'),              # PPO, A2C (SB3)
+        os.path.join(algo_dir, 'final.pt'),                # DQN
+        os.path.join(algo_dir, 'final_best_genome.pkl'),   # NEAT
+    ]
+    for path in candidates:
+        if os.path.isfile(path):
+            return path, metadata
+
+    return None, None
+
+
 def main():
     """Main entry point for training and evaluation."""
     args = parse_args()
@@ -260,10 +292,11 @@ def main():
         args.next_stage = False
 
     print(f'\n{"="*60}')
-    print(f'  Super Mario Bros ML Training')
+    print(f'  {game_adapter.name} — ML Training')
     print(f'  Algorithm: {args.algorithm.upper()}')
     print(f'  Mode: {"Evaluation" if args.eval else "Training"}')
-    print(f'  World: {args.world}-{args.stage}')
+    if args.game == 'mario':
+        print(f'  World: {args.world}-{args.stage}')
     print(f'  Visualization: {"ON" if args.visualize else "OFF"}')
     if num_envs > 1:
         print(f'  Parallel Envs: {num_envs}')
@@ -276,16 +309,21 @@ def main():
     # ================================================================
     # Create Environment
     # ================================================================
-    from src.environment.mario_env import create_mario_env, create_neat_env, create_cnn_env
-
-    # NEAT uses a smaller observation space (13x13)
-    # PPO and DQN use standard 84x84 with frame stacking
-    if args.algorithm == 'neat':
+    # Mario uses its own factory functions for backward compatibility
+    # (CustomRewardWrapper, frame-stacking, etc.).
+    # All other games go through the universal adapter path.
+    if args.game == 'mario' and args.algorithm == 'neat':
+        from src.environment.mario_env import create_neat_env
         env = create_neat_env(world=args.world, stage=args.stage)
         print(f'Environment: NEAT mode (13x13 grayscale)')
-    else:
+    elif args.game == 'mario':
+        from src.environment.mario_env import create_cnn_env
         env = create_cnn_env(world=args.world, stage=args.stage)
         print(f'Environment: CNN mode (84x84x4 stacked frames)')
+    else:
+        from src.environment.universal_env import create_env_from_adapter
+        env = create_env_from_adapter(game_adapter)
+        print(f'Environment: {game_adapter.name} {env.observation_space.shape}')
 
     print(f'Observation space: {env.observation_space.shape}')
     print(f'Action space: {env.action_space.n} actions\n')
@@ -423,13 +461,39 @@ def main():
             stage=args.stage,
         )
 
+    elif args.algorithm == 'a2c':
+        from src.algorithms.a2c.a2c_trainer import A2CTrainer
+        config_path = os.path.join(project_root, 'config', 'a2c_config.yaml')
+        with open(config_path, 'r') as f:
+            config = yaml.safe_load(f)
+        trainer = A2CTrainer(
+            env=env,
+            config=config,
+            visualizer=dashboard,
+        )
+
     # ================================================================
-    # Load Checkpoint (if specified)
+    # Load Checkpoint (explicit or auto-resume)
     # ================================================================
     if args.load:
         print(f'Loading checkpoint: {args.load}')
         trainer.load_checkpoint(args.load)
         print('Checkpoint loaded successfully.\n')
+    elif not args.eval:
+        # Auto-resume: check for an existing training session
+        resume_path, resume_meta = find_resume_checkpoint(args.algorithm)
+        if resume_path:
+            ep = resume_meta.get('episode', '?')
+            best = resume_meta.get('best_reward', '?')
+            elapsed = resume_meta.get('elapsed_time', '?')
+            print(f'  Found existing training session:')
+            print(f'    Episodes: {ep}  |  Best reward: {best}  |  Time: {elapsed}')
+            print(f'    Resuming from: {resume_path}')
+            trainer.load_checkpoint(resume_path)
+            trainer.episode_count = int(resume_meta.get('episode', 0))
+            trainer.best_reward = float(resume_meta.get('best_reward', float('-inf')))
+            trainer.best_distance = int(resume_meta.get('best_distance', 0))
+            print('  Checkpoint loaded. Continuing training.\n')
 
     # ================================================================
     # Run Training or Evaluation
@@ -489,6 +553,13 @@ def main():
                     print(f'Training DQN on World {current_world}-{current_stage} '
                           f'for {num_episodes:,} episodes...\n')
                     trainer.train(num_episodes=num_episodes)
+
+                elif args.algorithm == 'a2c':
+                    if args.episodes:
+                        config['total_timesteps'] = args.episodes * 1000
+                    timesteps = config.get('total_timesteps', 1_000_000)
+                    print(f'Training A2C for {timesteps:,} timesteps...\n')
+                    trainer.train()
 
                 # Check if we should advance to the next stage
                 if curriculum:

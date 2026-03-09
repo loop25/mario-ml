@@ -5,6 +5,10 @@ This migrates our existing Super Mario Bros environment into the
 plugin system without changing any of the original code. The
 original mario_env.py and CustomRewardWrapper continue to work
 unchanged for backwards compatibility.
+
+Imports are lazy so the adapter is discoverable even when
+gym-super-mario-bros is not installed. The actual ROM dependency
+is only required when create_env() is called.
 """
 from typing import Optional, Tuple
 
@@ -16,12 +20,16 @@ from games.reward_config import (
     RewardConfig,
     ActionSpaceInfo,
 )
-from src.environment.mario_env import create_mario_env, MARIO_ACTIONS
-from src.training.curriculum import CurriculumManager
 
 
 # Approximate max x_pos for progress calculation
 _MARIO_MAX_X = 3200
+
+# Mario's 7 simplified actions (matches JoypadSpace filtering)
+_MARIO_ACTION_LABELS = [
+    'NOOP', 'Right', 'Right+Jump', 'Right+Run',
+    'Right+Run+Jump', 'Jump', 'Left',
+]
 
 
 class MarioAdapter(BaseGameAdapter):
@@ -41,7 +49,7 @@ class MarioAdapter(BaseGameAdapter):
 
     @property
     def description(self) -> str:
-        return 'Classic NES platformer — run, jump, and stomp through 32 stages.'
+        return 'Classic NES Super Mario Bros platformer — run, jump, and stomp through 32 stages.'
 
     def create_env(self, **kwargs) -> gym.Env:
         """Create a Mario environment.
@@ -54,7 +62,12 @@ class MarioAdapter(BaseGameAdapter):
 
         Note: We set apply_reward_shaping=False because the framework
         applies its own TimeRewardWrapper from get_reward_config().
+
+        Raises:
+            ImportError: If gym-super-mario-bros is not installed.
         """
+        from src.environment.mario_env import create_mario_env
+
         world = kwargs.get('world', 1)
         stage = kwargs.get('stage', 1)
         resize_shape = kwargs.get('resize_shape', (84, 84))
@@ -71,11 +84,8 @@ class MarioAdapter(BaseGameAdapter):
 
     def get_action_space_info(self) -> ActionSpaceInfo:
         return ActionSpaceInfo(
-            num_actions=len(MARIO_ACTIONS),
-            action_labels=[
-                'NOOP', 'Right', 'Right+Jump', 'Right+Run',
-                'Right+Run+Jump', 'Jump', 'Left',
-            ],
+            num_actions=len(_MARIO_ACTION_LABELS),
+            action_labels=list(_MARIO_ACTION_LABELS),
         )
 
     def get_observation_shape(self) -> Tuple[int, ...]:
@@ -110,5 +120,6 @@ class MarioAdapter(BaseGameAdapter):
             'stage': (int, 1, 'Stage number 1-4'),
         }
 
-    def get_curriculum(self) -> Optional[CurriculumManager]:
+    def get_curriculum(self) -> Optional['CurriculumManager']:
+        from src.training.curriculum import CurriculumManager
         return CurriculumManager()
