@@ -51,13 +51,7 @@ project_root = os.path.dirname(os.path.abspath(__file__))
 if project_root not in sys.path:
     sys.path.insert(0, project_root)
 
-from src.environment.mario_env import create_mario_env, create_neat_env, create_cnn_env
-from src.visualization.dashboard import Dashboard
-from src.algorithms.neat.neat_trainer import NEATTrainer
-from src.algorithms.neat.parallel_eval import ParallelGenomeEvaluator
-from src.algorithms.ppo.ppo_trainer import PPOTrainer
-from src.algorithms.dqn.dqn_trainer import DQNTrainer
-from src.streaming.recording import Recorder
+from games.registry import GameRegistry
 
 
 def parse_args():
@@ -78,13 +72,28 @@ Examples:
         """,
     )
 
-    # Required: which algorithm to use
+    # Which algorithm to use
     parser.add_argument(
         '--algorithm', '-a',
         type=str,
-        required=True,
-        choices=['neat', 'ppo', 'dqn'],
-        help='ML algorithm to use: neat, ppo, or dqn',
+        required=False,
+        default='dqn',
+        choices=['neat', 'ppo', 'dqn', 'a2c'],
+        help='ML algorithm to use: neat, ppo, dqn, or a2c',
+    )
+
+    # Game selection
+    parser.add_argument(
+        '--game', '-g',
+        type=str,
+        default='mario',
+        help='Game to play. Use --list-games to see available games. Default: mario',
+    )
+
+    parser.add_argument(
+        '--list-games',
+        action='store_true',
+        help='List all available games and exit.',
     )
 
     # Training mode
@@ -213,6 +222,26 @@ def main():
     """Main entry point for training and evaluation."""
     args = parse_args()
 
+    # Initialize game registry
+    registry = GameRegistry()
+    registry.discover()
+
+    if args.list_games:
+        print('\nAvailable games:')
+        for adapter in registry.list_games():
+            print(f'  {adapter.game_id:12s}  [{adapter.category:10s}]  {adapter.name}')
+        sys.exit(0)
+
+    # Validate game selection
+    try:
+        game_adapter = registry.get_game(args.game)
+    except KeyError as e:
+        print(f'\nError: {e}')
+        print('Use --list-games to see available games.')
+        sys.exit(1)
+
+    print(f'\nGame: {game_adapter.name} ({game_adapter.game_id})')
+
     num_envs = max(1, args.num_envs)
 
     # Recording requires visualization (captures the dashboard surface)
@@ -247,6 +276,8 @@ def main():
     # ================================================================
     # Create Environment
     # ================================================================
+    from src.environment.mario_env import create_mario_env, create_neat_env, create_cnn_env
+
     # NEAT uses a smaller observation space (13x13)
     # PPO and DQN use standard 84x84 with frame stacking
     if args.algorithm == 'neat':
@@ -262,6 +293,7 @@ def main():
     # ================================================================
     # Create Recorder (if requested)
     # ================================================================
+    from src.streaming.recording import Recorder
     recorder = None
     if args.record:
         os.makedirs('recordings', exist_ok=True)
@@ -334,6 +366,7 @@ def main():
     # ================================================================
     # Create Visualization Dashboard
     # ================================================================
+    from src.visualization.dashboard import Dashboard
     dashboard = None
     if args.visualize:
         dashboard = Dashboard(
@@ -350,6 +383,8 @@ def main():
     # Create Trainer
     # ================================================================
     if args.algorithm == 'neat':
+        from src.algorithms.neat.neat_trainer import NEATTrainer
+        from src.algorithms.neat.parallel_eval import ParallelGenomeEvaluator
         config_path = os.path.join(project_root, 'config', 'neat_config.txt')
         trainer = NEATTrainer(
             env=env,
@@ -361,6 +396,7 @@ def main():
         )
 
     elif args.algorithm == 'ppo':
+        from src.algorithms.ppo.ppo_trainer import PPOTrainer
         config_path = os.path.join(project_root, 'config', 'ppo_config.yaml')
         with open(config_path, 'r') as f:
             config = yaml.safe_load(f)
@@ -374,6 +410,7 @@ def main():
         )
 
     elif args.algorithm == 'dqn':
+        from src.algorithms.dqn.dqn_trainer import DQNTrainer
         config_path = os.path.join(project_root, 'config', 'dqn_config.yaml')
         with open(config_path, 'r') as f:
             config = yaml.safe_load(f)
