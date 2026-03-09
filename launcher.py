@@ -26,6 +26,8 @@ import subprocess
 import tkinter as tk
 from tkinter import ttk, filedialog
 
+from games.registry import GameRegistry
+
 # ---------------------------------------------------------------------------
 # Path setup — figure out where the project lives
 # ---------------------------------------------------------------------------
@@ -90,6 +92,13 @@ ALGO_INFO = {
         "file_ext": [("PyTorch Model", "*.pt"), ("All Files", "*.*")],
         "model_subdir": "dqn",
     },
+    "a2c": {
+        "color": ACCENT_GREEN,
+        "duration_label": "Timesteps (×1000)",
+        "duration_default": "1000",
+        "file_ext": [("SB3 Model", "*.zip"), ("All Files", "*.*")],
+        "model_subdir": "a2c",
+    },
 }
 
 
@@ -138,8 +147,15 @@ class MarioLauncher:
             value=os.path.join(PROJECT_ROOT, 'assets', 'music')
         )
 
+        # Discover games
+        self.game_registry = GameRegistry()
+        self.game_registry.discover()
+        self.available_games = self.game_registry.list_games()
+        self.game_var = tk.StringVar(value='mario')
+
         # Build all GUI sections
         self._build_header()
+        self._build_game_selector()
         self._build_algorithm_selector()
         self._build_world_stage()
         self._build_duration()
@@ -193,8 +209,31 @@ class MarioLauncher:
         )
         subtitle.pack()
 
+    def _build_game_selector(self):
+        """Dropdown for choosing which game to play."""
+        section = tk.Frame(self.root, bg=BG_DARK, pady=10, padx=25)
+        section.pack(fill="x")
+
+        tk.Label(
+            section,
+            text="Game",
+            font=("Segoe UI", 10),
+            fg=TEXT_DIM,
+            bg=BG_DARK,
+        ).pack(anchor="w")
+
+        game_names = [f"{g.name} ({g.game_id})" for g in self.available_games]
+        if not game_names:
+            game_names = ["Super Mario Bros (mario)"]
+        self.game_combo = ttk.Combobox(
+            section, textvariable=self.game_var,
+            values=game_names, state="readonly",
+        )
+        self.game_combo.pack(fill="x", pady=(3, 0))
+        self.game_combo.set(game_names[0])
+
     def _build_algorithm_selector(self):
-        """Three toggle buttons for NEAT / PPO / DQN."""
+        """Toggle buttons for NEAT / PPO / DQN / A2C."""
         section = tk.Frame(self.root, bg=BG_DARK, pady=10, padx=25)
         section.pack(fill="x")
 
@@ -213,7 +252,7 @@ class MarioLauncher:
         # Store button references so we can restyle them on selection
         self.algo_buttons = {}
 
-        for algo in ["neat", "ppo", "dqn"]:
+        for algo in ["neat", "ppo", "dqn", "a2c"]:
             btn = tk.Button(
                 btn_frame,
                 text=algo.upper(),
@@ -768,11 +807,16 @@ class MarioLauncher:
             self._set_status("Please load a model for evaluation.", ACCENT_RED)
             return
 
+        # Extract game_id from combo text: "Snake (snake)" -> "snake"
+        game_text = self.game_combo.get()
+        game_id = game_text.rsplit("(", 1)[-1].rstrip(")").strip() if "(" in game_text else "mario"
+
         # Build the command — use venv Python so all deps are available
         cmd = [
             VENV_PYTHON,
             MAIN_SCRIPT,
             "--algorithm", algo,
+            "--game", game_id,
             "--world", world,
             "--stage", stage,
         ]
