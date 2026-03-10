@@ -242,6 +242,12 @@ class MarioLauncher:
         self.game_combo.set(game_names[0])
         self.game_combo.bind("<<ComboboxSelected>>", self._on_game_changed)
 
+        # Dynamic game-specific options container
+        self.game_opts_frame = tk.Frame(section, bg=BG_DARK)
+        self.game_opts_frame.pack(fill="x", pady=(5, 0))
+        self.game_opt_widgets = {}  # name -> (var, widget)
+        self._rebuild_game_options()
+
     def _build_algorithm_selector(self):
         """Toggle buttons for NEAT / PPO / DQN / A2C."""
         section = tk.Frame(self.root, bg=BG_DARK, pady=10, padx=25)
@@ -288,6 +294,91 @@ class MarioLauncher:
         except KeyError:
             return None
 
+    def _rebuild_game_options(self):
+        """Rebuild the dynamic game-specific options widgets."""
+        # Clear existing widgets
+        for widget in self.game_opts_frame.winfo_children():
+            widget.destroy()
+        self.game_opt_widgets.clear()
+
+        adapter = self._get_selected_adapter()
+        if not adapter:
+            return
+
+        opts = adapter.get_game_specific_options()
+        if not opts:
+            return
+
+        tk.Label(
+            self.game_opts_frame,
+            text="Game Options",
+            font=("Segoe UI", 9),
+            fg=TEXT_DIM,
+            bg=BG_DARK,
+        ).pack(anchor="w", pady=(3, 2))
+
+        for name, (opt_type, default, desc) in opts.items():
+            row = tk.Frame(self.game_opts_frame, bg=BG_DARK)
+            row.pack(fill="x", pady=1)
+
+            tk.Label(
+                row,
+                text=f"{name}:",
+                font=("Segoe UI", 9),
+                fg=TEXT_PRIMARY,
+                bg=BG_DARK,
+                width=12,
+                anchor="w",
+            ).pack(side="left")
+
+            if opt_type == bool:
+                var = tk.BooleanVar(value=default)
+                widget = tk.Checkbutton(
+                    row, variable=var,
+                    bg=BG_DARK, selectcolor=BG_MEDIUM,
+                    activebackground=BG_DARK,
+                )
+            elif opt_type == int:
+                var = tk.StringVar(value=str(default))
+                widget = tk.Entry(
+                    row, textvariable=var,
+                    font=("Segoe UI", 9), bg=BG_LIGHT, fg=TEXT_PRIMARY,
+                    insertbackground=TEXT_PRIMARY, relief="flat", width=8,
+                )
+            else:
+                var = tk.StringVar(value=str(default))
+                widget = tk.Entry(
+                    row, textvariable=var,
+                    font=("Segoe UI", 9), bg=BG_LIGHT, fg=TEXT_PRIMARY,
+                    insertbackground=TEXT_PRIMARY, relief="flat", width=15,
+                )
+
+            widget.pack(side="left", padx=(3, 5))
+            self.game_opt_widgets[name] = (var, opt_type)
+
+            tk.Label(
+                row,
+                text=desc,
+                font=("Segoe UI", 8),
+                fg=TEXT_DIM,
+                bg=BG_DARK,
+            ).pack(side="left")
+
+    def _get_game_options(self) -> dict:
+        """Collect current game-specific option values."""
+        result = {}
+        for name, (var, opt_type) in self.game_opt_widgets.items():
+            try:
+                if opt_type == bool:
+                    result[name] = var.get()
+                elif opt_type == int:
+                    result[name] = int(var.get())
+                else:
+                    result[name] = var.get()
+            except (ValueError, tk.TclError):
+                pass
+        return result
+
     def _on_game_changed(self, event=None):
         """Handle game selection change — update algorithm compatibility."""
         adapter = self._get_selected_adapter()
@@ -301,6 +392,7 @@ class MarioLauncher:
                 self.model_path_var.set("")
                 self._update_model_display()
         self._update_algo_buttons()
+        self._rebuild_game_options()
 
     def _select_algorithm(self, algo):
         """Handle algorithm button click."""
@@ -827,7 +919,33 @@ class MarioLauncher:
             padx=10,
             command=lambda: self._open_folder(RECORDINGS_DIR),
         )
-        rec_btn.pack(side="left", expand=True, fill="x", padx=(3, 0))
+        rec_btn.pack(side="left", expand=True, fill="x", padx=(3, 3))
+
+        compare_btn = tk.Button(
+            section,
+            text="Compare Runs",
+            font=("Segoe UI", 9),
+            bg=BG_MEDIUM,
+            fg=TEXT_DIM,
+            activebackground=BG_LIGHT,
+            activeforeground=TEXT_PRIMARY,
+            relief="flat",
+            cursor="hand2",
+            padx=10,
+            command=self._open_comparison,
+        )
+        compare_btn.pack(side="left", expand=True, fill="x", padx=(3, 0))
+
+    def _open_comparison(self):
+        """Open the cross-game training comparison panel."""
+        try:
+            from src.visualization.comparison_panel import ComparisonPanel
+            ComparisonPanel(
+                logs_dir=os.path.join(PROJECT_ROOT, 'logs'),
+                parent=self.root,
+            )
+        except ImportError as e:
+            self._set_status(f"Comparison panel error: {e}", ACCENT_RED)
 
     def _build_rom_import(self):
         """ROM import wizard for stable-retro games (Sonic, Pokemon, etc.)."""
@@ -1035,6 +1153,13 @@ class MarioLauncher:
                 print(f'[Music] Directory not found: {music_dir!r}, skipping music')
             else:
                 cmd.extend(["--music", music_dir])
+
+        # Add game-specific options from the dynamic config panel
+        game_opts = self._get_game_options()
+        if game_opts:
+            cmd.append("--game-opts")
+            for key, value in game_opts.items():
+                cmd.append(f"{key}={value}")
 
         # Launch the subprocess
         try:

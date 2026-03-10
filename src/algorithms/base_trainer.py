@@ -445,6 +445,16 @@ class BaseTrainer(ABC):
                 os.makedirs(os.path.dirname(metrics_path), exist_ok=True)
                 self.visualizer.metrics.export_json(metrics_path)
 
+                # Save timestamped run log for cross-game comparison
+                game_id = getattr(self, 'game_id', 'unknown')
+                timestamp = time.strftime('%Y%m%d_%H%M%S')
+                run_dir = os.path.join(self.log_dir, 'runs')
+                os.makedirs(run_dir, exist_ok=True)
+                run_path = os.path.join(
+                    run_dir, f'{game_id}_{algo_name}_{timestamp}.json'
+                )
+                self.visualizer.metrics.export_json(run_path)
+
             print(f'  Model saved to: {save_path}/')
             print(f'  Episodes completed: {self.episode_count}')
             print(f'  Best reward: {self.best_reward:.1f}')

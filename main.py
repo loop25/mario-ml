@@ -195,7 +195,42 @@ Examples:
         help='Enable curriculum learning for whole-game training (all 32 stages)',
     )
 
+    # Game-specific options (key=value pairs from the launcher)
+    parser.add_argument(
+        '--game-opts',
+        nargs='*',
+        default=[],
+        help='Game-specific options as key=value pairs '
+             '(e.g., --game-opts grid_size=16 speed=10)',
+    )
+
     return parser.parse_args()
+
+
+def parse_game_opts(raw_opts: list) -> dict:
+    """Parse --game-opts key=value pairs into a dict with type inference.
+
+    Tries int first, then float, then bool ('true'/'false'), else str.
+    """
+    result = {}
+    for item in raw_opts:
+        if '=' not in item:
+            continue
+        key, value = item.split('=', 1)
+        key = key.strip()
+        value = value.strip()
+        # Type inference
+        if value.lower() in ('true', 'false'):
+            result[key] = value.lower() == 'true'
+        else:
+            try:
+                result[key] = int(value)
+            except ValueError:
+                try:
+                    result[key] = float(value)
+                except ValueError:
+                    result[key] = value
+    return result
 
 
 def next_world_stage(world: int, stage: int):
@@ -324,6 +359,11 @@ def main():
         print(f'  Curriculum Learning: ON (all 32 stages)')
     print(f'{"="*60}\n')
 
+    # Parse game-specific options from --game-opts key=value pairs
+    game_kwargs = parse_game_opts(args.game_opts)
+    if game_kwargs:
+        print(f'  Game options: {game_kwargs}')
+
     # ================================================================
     # Create Environment
     # ================================================================
@@ -340,7 +380,7 @@ def main():
         print(f'Environment: CNN mode (84x84x4 stacked frames)')
     else:
         from src.environment.universal_env import create_env_from_adapter
-        env = create_env_from_adapter(game_adapter)
+        env = create_env_from_adapter(game_adapter, **game_kwargs)
         print(f'Environment: {game_adapter.name} {env.observation_space.shape}')
 
     print(f'Observation space: {env.observation_space.shape}')
