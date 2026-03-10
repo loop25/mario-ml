@@ -148,6 +148,52 @@ class BaseGameAdapter(ABC):
         """
         return ['neat', 'ppo', 'dqn', 'a2c']
 
+    # ---- Dashboard Configuration (optional) ----
+
+    def get_dashboard_config(self) -> dict:
+        """Return dashboard display configuration for this game.
+
+        The dashboard uses this to customize graph titles, status bar
+        metrics, and other game-specific display elements.
+
+        Keys:
+            graph_2_title: Title for the second graph (top-right).
+            graph_2_metric: Metric key in MetricsTracker for graph 2.
+            graph_2_info_key: Key in env info dict to extract the value.
+            status_metric_label: Label for the secondary status bar value.
+            status_metric_key: Metric key for the secondary status value.
+
+        Override to customize. Default is tuned for platformers (distance).
+        """
+        return {
+            'graph_2_title': 'Distance (x position)',
+            'graph_2_metric': 'distance',
+            'graph_2_info_key': 'x_pos',
+            'status_metric_label': 'Distance',
+            'status_metric_key': 'distance',
+        }
+
+    def get_completion_criteria(self) -> dict:
+        """Return criteria for detecting when training is "complete".
+
+        The dashboard can show a mastery progress bar based on these
+        criteria. Different games have different definitions of mastery.
+
+        Keys:
+            metric: Which metric to track ('reward', 'score', 'win_rate').
+            threshold: Value that indicates mastery.
+            window: Number of recent episodes to average over.
+            description: Human-readable description of the goal.
+
+        Override per game. Default: average reward > 500 over 50 episodes.
+        """
+        return {
+            'metric': 'reward',
+            'threshold': 500.0,
+            'window': 50,
+            'description': 'Avg reward > 500 over 50 episodes',
+        }
+
     # ---- For SB3 Algorithms (optional) ----
 
     def needs_sb3_compat(self) -> bool:

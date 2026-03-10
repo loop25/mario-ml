@@ -1,8 +1,8 @@
 """
-Game Renderer for Super Mario Bros ML Dashboard.
+Game Renderer for ML Training Dashboard.
 
-Handles rendering NES game frames to a pygame surface. The renderer
-scales the raw NES output (240x256) to fit the dashboard's game panel
+Handles rendering game frames to a pygame surface. The renderer
+scales the raw game output to fit the dashboard's game panel
 while maintaining the correct aspect ratio.
 
 Features:

@@ -200,3 +200,68 @@ class TestAllAdaptersConformToInterface:
         for adapter in registry.list_games():
             shape = adapter.get_observation_shape()
             assert len(shape) >= 2
+
+
+class TestDashboardConfig:
+    """Test that each adapter provides valid dashboard configuration."""
+
+    def test_all_adapters_have_dashboard_config(self):
+        registry = GameRegistry()
+        registry.discover()
+        required_keys = {
+            'graph_2_title', 'graph_2_metric', 'graph_2_info_key',
+            'status_metric_label', 'status_metric_key',
+        }
+        for adapter in registry.list_games():
+            config = adapter.get_dashboard_config()
+            assert isinstance(config, dict)
+            assert required_keys.issubset(config.keys()), (
+                f'{adapter.name} dashboard_config missing keys: '
+                f'{required_keys - config.keys()}'
+            )
+
+    def test_snake_dashboard_config_uses_score(self):
+        registry = GameRegistry()
+        registry.discover()
+        snake = registry.get_game('snake')
+        config = snake.get_dashboard_config()
+        assert config['graph_2_metric'] == 'score'
+        assert config['graph_2_info_key'] == 'score'
+
+    def test_connect4_dashboard_config_uses_win_rate(self):
+        registry = GameRegistry()
+        registry.discover()
+        c4 = registry.get_game('connect4')
+        config = c4.get_dashboard_config()
+        assert config['graph_2_metric'] == 'win_rate'
+        assert config['graph_2_info_key'] == 'winner'
+
+    def test_all_adapters_have_completion_criteria(self):
+        registry = GameRegistry()
+        registry.discover()
+        required_keys = {'metric', 'threshold', 'window', 'description'}
+        for adapter in registry.list_games():
+            criteria = adapter.get_completion_criteria()
+            assert isinstance(criteria, dict)
+            assert required_keys.issubset(criteria.keys()), (
+                f'{adapter.name} completion_criteria missing keys: '
+                f'{required_keys - criteria.keys()}'
+            )
+            assert criteria['threshold'] > 0
+            assert criteria['window'] > 0
+
+    def test_snake_completion_criteria(self):
+        registry = GameRegistry()
+        registry.discover()
+        snake = registry.get_game('snake')
+        criteria = snake.get_completion_criteria()
+        assert criteria['metric'] == 'score'
+        assert criteria['threshold'] == 50.0
+
+    def test_connect4_completion_criteria(self):
+        registry = GameRegistry()
+        registry.discover()
+        c4 = registry.get_game('connect4')
+        criteria = c4.get_completion_criteria()
+        assert criteria['metric'] == 'win_rate'
+        assert criteria['threshold'] == 0.9

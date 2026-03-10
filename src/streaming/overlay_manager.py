@@ -34,6 +34,7 @@ class OverlayManager:
         episode: Optional[int] = None,
         reward: Optional[float] = None,
         elapsed_time: Optional[float] = None,
+        game_name: Optional[str] = None,
     ) -> np.ndarray:
         """
         Compose the final stream frame with overlays.
@@ -46,6 +47,7 @@ class OverlayManager:
             episode: Current episode number.
             reward: Current/best reward.
             elapsed_time: Training elapsed time in seconds.
+            game_name: Current game name for overlay display.
 
         Returns:
             Composited frame at target resolution (H, W, 3) uint8.
@@ -61,8 +63,8 @@ class OverlayManager:
         if is_live:
             self._draw_live_badge(frame_bgr)
 
-        if algorithm:
-            self._draw_algo_info(frame_bgr, algorithm, stage)
+        if algorithm or game_name:
+            self._draw_algo_info(frame_bgr, algorithm, stage, game_name)
 
         if episode is not None or reward is not None:
             self._draw_stats_ticker(frame_bgr, episode, reward, elapsed_time)
@@ -77,11 +79,21 @@ class OverlayManager:
         cv2.putText(frame_bgr, 'LIVE', (35, 27),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 255), 2)
 
-    def _draw_algo_info(self, frame_bgr: np.ndarray, algorithm: str, stage: Optional[str]) -> None:
-        text = algorithm.upper()
+    def _draw_algo_info(
+        self, frame_bgr: np.ndarray, algorithm: Optional[str],
+        stage: Optional[str], game_name: Optional[str] = None,
+    ) -> None:
+        parts = []
+        if game_name:
+            parts.append(game_name)
+        if algorithm:
+            parts.append(algorithm.upper())
         if stage:
-            text += f'  |  World {stage}'
-        x = self.width - 300
+            parts.append(f'World {stage}')
+        text = '  |  '.join(parts)
+        # Position from the right, allowing more space for game name
+        text_width = len(text) * 10 + 50
+        x = max(10, self.width - text_width)
         y = 27
         cv2.putText(frame_bgr, text, (x + 1, y + 1),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 0), 2)

@@ -68,6 +68,23 @@ class SnakeAdapter(BaseGameAdapter):
         # NEAT requires small flat obs (13x13); Snake uses 84x84 images.
         return ['ppo', 'dqn', 'a2c']
 
+    def get_dashboard_config(self) -> dict:
+        return {
+            'graph_2_title': 'Score (food eaten)',
+            'graph_2_metric': 'score',
+            'graph_2_info_key': 'score',
+            'status_metric_label': 'Score',
+            'status_metric_key': 'score',
+        }
+
+    def get_completion_criteria(self) -> dict:
+        return {
+            'metric': 'score',
+            'threshold': 50.0,
+            'window': 50,
+            'description': 'Avg score > 50 over 50 episodes',
+        }
+
     def get_game_specific_options(self) -> dict:
         return {
             'grid_size': (int, 16, 'Grid size (8, 16, or 32)'),

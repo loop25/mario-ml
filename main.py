@@ -1,8 +1,8 @@
 """
-Super Mario Bros ML Training - Main Entry Point.
+ML Training Platform - Main Entry Point.
 
-Run this script to train or evaluate any of the three ML algorithms
-(NEAT, PPO, DQN) on Super Mario Bros with live visualization.
+Run this script to train or evaluate ML algorithms
+(NEAT, PPO, DQN, A2C) on any supported game with live visualization.
 
 Usage:
     # Train NEAT with live dashboard:
@@ -425,6 +425,11 @@ def main():
     from src.visualization.dashboard import Dashboard
     dashboard = None
     if args.visualize:
+        # Extract game-specific dashboard metadata from the adapter
+        action_info = game_adapter.get_action_space_info()
+        dash_config = game_adapter.get_dashboard_config()
+        completion_criteria = game_adapter.get_completion_criteria()
+
         dashboard = Dashboard(
             algorithm=args.algorithm,
             num_envs=num_envs,
@@ -432,6 +437,10 @@ def main():
             music_manager=music_manager,
             stream_manager=stream_manager,
             overlay_manager=overlay_manager,
+            game_name=game_adapter.name,
+            action_labels=action_info.action_labels,
+            dashboard_config=dash_config,
+            completion_criteria=completion_criteria,
         )
         print('Dashboard window opened.')
 
@@ -488,10 +497,17 @@ def main():
             env=env,
             config=config,
             visualizer=dashboard,
+            num_envs=num_envs,
         )
 
     # Tag the trainer with the game so metadata.json records it.
     trainer.game_id = args.game
+
+    # Pass dashboard config to trainer so callbacks know which
+    # info-dict keys to extract and how many actions to track.
+    trainer.dashboard_config = game_adapter.get_dashboard_config()
+    action_info = game_adapter.get_action_space_info()
+    trainer.num_actions = action_info.num_actions
 
     # ================================================================
     # Load Checkpoint (explicit or auto-resume)

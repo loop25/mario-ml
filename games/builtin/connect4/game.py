@@ -130,9 +130,52 @@ class ConnectFourEnv(gym.Env):
                          interpolation=cv2.INTER_NEAREST)
         return np.expand_dims(obs, axis=-1)
 
+    def _render_rgb(self) -> np.ndarray:
+        """Render a colorful Connect Four board for dashboard/stream.
+
+        Blue board with red/yellow circular pieces — classic colors.
+        Empty slots are dark circles cut into the blue board.
+        """
+        # Cell size in pixels
+        cell_px = self.render_size // max(ROWS, COLS)
+        board_w = cell_px * COLS
+        board_h = cell_px * ROWS
+        img = np.zeros((board_h, board_w, 3), dtype=np.uint8)
+
+        # Blue board background
+        img[:] = (30, 60, 180)
+
+        radius = max(2, cell_px // 2 - 2)
+
+        for r in range(ROWS):
+            for c in range(COLS):
+                cx = c * cell_px + cell_px // 2
+                cy = r * cell_px + cell_px // 2
+
+                if self.board[r, c] == 0:
+                    # Empty slot: dark circle
+                    cv2.circle(img, (cx, cy), radius, (15, 15, 30), -1)
+                elif self.board[r, c] == 1:
+                    # Player 1: red piece with highlight
+                    cv2.circle(img, (cx, cy), radius, (220, 50, 50), -1)
+                    # Highlight (smaller, offset circle for 3D look)
+                    if radius > 4:
+                        cv2.circle(img, (cx - 1, cy - 1), radius // 3,
+                                   (255, 120, 120), -1)
+                elif self.board[r, c] == 2:
+                    # Player 2: yellow piece with highlight
+                    cv2.circle(img, (cx, cy), radius, (240, 210, 40), -1)
+                    if radius > 4:
+                        cv2.circle(img, (cx - 1, cy - 1), radius // 3,
+                                   (255, 240, 140), -1)
+
+        # Resize to render_size square
+        img = cv2.resize(img, (self.render_size, self.render_size),
+                         interpolation=cv2.INTER_LINEAR)
+        return img
+
     def render(self, mode='rgb_array'):
-        gray = self._render_obs()[:, :, 0]
-        return cv2.cvtColor(gray, cv2.COLOR_GRAY2RGB)
+        return self._render_rgb()
 
     def _info(self) -> dict:
         return {

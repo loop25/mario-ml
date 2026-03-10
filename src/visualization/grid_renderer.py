@@ -1,8 +1,8 @@
 """
-Grid Renderer for Multi-Mario Display.
+Grid Renderer for Multi-Environment Display.
 
 Manages N GameRenderer instances arranged in a grid layout within the
-dashboard's game panel area. Each cell shows a different game running
+dashboard's game panel area. Each cell shows a different environment running
 simultaneously (different genomes for NEAT, different environments for
 PPO/DQN).
 

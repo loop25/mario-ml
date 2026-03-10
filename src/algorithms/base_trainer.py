@@ -1,7 +1,7 @@
 """
-Base Trainer Abstract Class for Super Mario Bros ML.
+Base Trainer Abstract Class.
 
-Defines the common interface that all algorithm trainers (NEAT, PPO, DQN)
+Defines the common interface that all algorithm trainers (NEAT, PPO, DQN, A2C)
 must implement. This ensures consistent behavior for:
     - Training loops
     - Model evaluation
@@ -52,7 +52,7 @@ class BaseTrainer(ABC):
     NEAT, PPO, and DQN trainers all use.
 
     Args:
-        env: The Mario environment instance (pre-wrapped).
+        env: The game environment instance (pre-wrapped).
         config: Dictionary of hyperparameters for the algorithm.
         visualizer: Optional Dashboard instance for live visualization.
         save_dir: Directory for saving checkpoints. Default 'models/'.
@@ -107,6 +107,12 @@ class BaseTrainer(ABC):
         # Game identity — set by main.py after trainer creation so
         # metadata.json records which game produced this checkpoint.
         self.game_id = None
+
+        # Dashboard config — set by main.py after trainer creation.
+        # Tells callbacks which info-dict keys to extract and what
+        # metric names to report to the dashboard.
+        self.dashboard_config = None
+        self.num_actions = 7  # Default; overridden per game
 
         # Checkpoint settings (can be overridden in config)
         self.checkpoint_interval = config.get('save_freq', 50)

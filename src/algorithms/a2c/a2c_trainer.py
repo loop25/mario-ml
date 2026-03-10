@@ -29,15 +29,49 @@ from src.visualization.dashboard import Dashboard
 
 
 class A2CDashboardCallback(BaseCallback):
-    """SB3 callback to feed A2C metrics to the dashboard."""
+    """SB3 callback to feed A2C metrics and gameplay frames to the dashboard."""
 
     def __init__(self, dashboard, trainer, verbose=0):
         super().__init__(verbose)
         self.dashboard = dashboard
         self.trainer = trainer
         self.episode_count = 0
+        self._latest_frame = None
 
     def _on_step(self):
+        # Read dashboard config for dynamic metric extraction
+        dash_cfg = self.trainer.dashboard_config or {}
+        info_key = dash_cfg.get('graph_2_info_key', 'x_pos')
+        metric_name = dash_cfg.get('graph_2_metric', 'distance')
+        num_actions = self.trainer.num_actions
+
+        # --- Live gameplay frame capture ---
+        display_interval = 16
+        if self.dashboard and self.num_timesteps % display_interval == 0:
+            try:
+                vec_env = self.trainer.vec_env
+                if vec_env is not None:
+                    dummy_env = vec_env.venv if hasattr(vec_env, 'venv') else vec_env
+                    try:
+                        # NES screen (if available)
+                        self._latest_frame = dummy_env.envs[0].unwrapped.screen.copy()
+                    except (AttributeError, Exception):
+                        try:
+                            # Built-in games: render() for colorful display
+                            frame = dummy_env.envs[0].render(mode='rgb_array')
+                            if frame is not None:
+                                self._latest_frame = frame
+                        except Exception:
+                            pass
+            except (AttributeError, Exception):
+                pass
+
+            if self._latest_frame is not None:
+                if not self.trainer.update_visualization(
+                    frame=self._latest_frame, metrics=None,
+                ):
+                    return False
+
         # Check for completed episodes
         for i, done in enumerate(self.locals.get('dones', [])):
             if done:
@@ -51,22 +85,64 @@ class A2CDashboardCallback(BaseCallback):
                     if reward > self.trainer.best_reward:
                         self.trainer.best_reward = reward
 
-                    # Fire episode callback for curriculum
-                    distance = infos[i].get('x_pos', 0)
+                    # Extract game-specific metric for curriculum callback
+                    game_metric = infos[i].get(info_key, 0)
                     completed = infos[i].get('stage_completed', False)
+
+                    # For Connect4: track win_rate from winner field
+                    if metric_name == 'win_rate':
+                        winner = infos[i].get('winner', 0)
+                        if not hasattr(self, '_win_tracker'):
+                            self._win_tracker = {
+                                'wins': 0, 'losses': 0, 'total': 0,
+                            }
+                        self._win_tracker['total'] += 1
+                        if winner == 1:
+                            self._win_tracker['wins'] += 1
+                        elif winner == 2:
+                            self._win_tracker['losses'] += 1
+                        game_metric = (
+                            self._win_tracker['wins'] / self._win_tracker['total']
+                        )
+
                     self.trainer._fire_episode_complete(
-                        reward=reward, distance=distance, completed=completed,
+                        reward=reward, distance=game_metric, completed=completed,
                     )
 
-        # Update dashboard
-        if self.dashboard and self.episode_count % 5 == 0:
-            metrics = {
-                'episode': self.episode_count,
-                'reward': self.trainer.best_reward,
-                'timestep': self.num_timesteps,
-            }
-            if not self.trainer.update_visualization(metrics=metrics):
-                return False  # Dashboard closed
+                    # Track action distribution from this step
+                    actions = self.locals.get('actions', [])
+                    action_counts = [0] * num_actions
+                    for a in actions:
+                        a_int = int(a)
+                        if 0 <= a_int < num_actions:
+                            action_counts[a_int] += 1
+
+                    # Report game-specific metric to dashboard
+                    if self.dashboard and self.episode_count % 5 == 0:
+                        metrics = {
+                            'episode': self.episode_count,
+                            'reward': reward,
+                            metric_name: game_metric,
+                            'action_distribution': action_counts,
+                        }
+                        # Also report opponent_win_rate for dual-line chart
+                        if metric_name == 'win_rate' and hasattr(self, '_win_tracker'):
+                            total = self._win_tracker['total']
+                            metrics['opponent_win_rate'] = (
+                                self._win_tracker['losses'] / total if total > 0 else 0
+                            )
+                        if not self.trainer.update_visualization(
+                            frame=self._latest_frame, metrics=metrics,
+                        ):
+                            return False  # Dashboard closed
+
+        # Periodic dashboard heartbeat (keeps frame rendering alive)
+        if self.dashboard and self.episode_count % 5 != 0:
+            if self.num_timesteps % 100 == 0:
+                if not self.trainer.update_visualization(
+                    frame=self._latest_frame, metrics=None,
+                ):
+                    return False
         return True
 
 
@@ -88,10 +164,26 @@ class A2CTrainer(BaseTrainer):
         visualizer: Optional[Dashboard] = None,
         save_dir: str = 'models',
         log_dir: str = 'logs',
+        num_envs: int = 1,
     ):
         super().__init__(env, config, visualizer, save_dir, log_dir)
         self.model = None
         self._env_factory = None
+        self.num_envs = num_envs
+        self.vec_env = None  # Stored so callback can access envs for frame capture
+
+    def _wrap_env_for_sb3(self, env, num_envs: int = 1):
+        """Wrap environment with SB3 compatibility for DummyVecEnv.
+
+        SB3's DummyVecEnv expects gymnasium-style reset() returning
+        (obs, info). Our built-in games use old-gym reset() returning
+        just obs. SB3CompatWrapper bridges this gap.
+        """
+        from src.environment.wrappers import SB3CompatWrapper
+        compat_env = SB3CompatWrapper(env)
+        vec_env = DummyVecEnv([lambda: compat_env])
+        vec_env = VecTransposeImage(vec_env)
+        return vec_env
 
     def train(self, num_episodes: int = None) -> None:
         """Train using A2C.
@@ -102,13 +194,16 @@ class A2CTrainer(BaseTrainer):
         total_timesteps = self.config.get('total_timesteps', 1_000_000)
         self.is_training = True
 
-        # Create vectorized environment
+        # Create vectorized environment with SB3 compatibility wrapping.
         num_envs = self.config.get('num_envs', 4)
         if self._env_factory:
             vec_env = DummyVecEnv([self._env_factory for _ in range(num_envs)])
+            vec_env = VecTransposeImage(vec_env)
         else:
-            vec_env = DummyVecEnv([lambda: self.env])
-        vec_env = VecTransposeImage(vec_env)
+            vec_env = self._wrap_env_for_sb3(self.env, num_envs=1)
+
+        # Store vec_env so callback can access envs for frame capture
+        self.vec_env = vec_env
 
         # Create or reuse A2C model (reuse when resuming from checkpoint)
         if self.model is None:

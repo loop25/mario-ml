@@ -1,8 +1,8 @@
 """
-Main Visualization Dashboard for Super Mario Bros ML.
+Main Visualization Dashboard for ML Training.
 
 The dashboard is a resizable pygame window that displays:
-    - Left panel (~46% width): Live game rendering showing Mario playing
+    - Left panel (~46% width): Live game rendering
     - Right panel (~54% width): 4 real-time updating performance graphs
     - Bottom bar: Current stats and best performance
     - Top bar: Title and algorithm name
@@ -111,10 +111,27 @@ class Dashboard:
         music_manager=None,
         stream_manager=None,
         overlay_manager=None,
+        game_name: str = 'Game',
+        action_labels: Optional[list] = None,
+        dashboard_config: Optional[Dict[str, Any]] = None,
+        completion_criteria: Optional[Dict[str, Any]] = None,
     ):
         # Initialize pygame
         pygame.init()
-        pygame.display.set_caption(f'Mario ML Dashboard - {algorithm.upper()}')
+
+        # Game metadata for dynamic display
+        self.game_name = game_name
+        self.dashboard_config = dashboard_config or {
+            'graph_2_title': 'Distance (x position)',
+            'graph_2_metric': 'distance',
+            'graph_2_info_key': 'x_pos',
+            'status_metric_label': 'Distance',
+            'status_metric_key': 'distance',
+        }
+        self.completion_criteria = completion_criteria
+        self._mastery_progress = 0.0  # 0.0 to 1.0
+
+        pygame.display.set_caption(f'{game_name} - {algorithm.upper()} Training')
 
         # Configuration (stored before layout calc so _rebuild uses them)
         self.algorithm = algorithm
@@ -160,6 +177,8 @@ class Dashboard:
             width=self.graph_panel_width,
             height=self.content_height,
             algorithm=algorithm,
+            action_labels=action_labels,
+            dashboard_config=self.dashboard_config,
         )
 
         # State tracking
@@ -287,6 +306,28 @@ class Dashboard:
     # Streaming Helper
     # ========================================================================
 
+    def check_mastery(self) -> float:
+        """Check training progress towards mastery criteria.
+
+        Returns a value from 0.0 (no progress) to 1.0 (mastered).
+        Uses the completion_criteria from the game adapter.
+        """
+        if not self.completion_criteria:
+            return 0.0
+
+        metric = self.completion_criteria.get('metric', 'reward')
+        threshold = self.completion_criteria.get('threshold', 500.0)
+        window = self.completion_criteria.get('window', 50)
+
+        values = self.metrics.get_values(metric)
+        if not values or len(values) < window:
+            return 0.0
+
+        recent = values[-window:]
+        avg = sum(recent) / len(recent)
+        self._mastery_progress = min(1.0, avg / threshold) if threshold > 0 else 0.0
+        return self._mastery_progress
+
     def _send_stream_frame(self) -> None:
         """Capture the current screen and send it to the streaming pipeline."""
         if not self.stream_manager or not self.stream_manager.is_streaming:
@@ -299,6 +340,7 @@ class Dashboard:
                 stream_frame,
                 is_live=True,
                 algorithm=self.algorithm,
+                game_name=self.game_name,
             )
         self.stream_manager.send_frame(stream_frame)
 
@@ -327,7 +369,7 @@ class Dashboard:
             metrics: Dictionary of metric values to record. Common keys:
                      - 'episode' / 'generation': Current episode number
                      - 'reward': Episode total reward
-                     - 'distance': Mario's x position
+                     - 'distance': Game-specific progress metric
                      - 'loss': Training loss value
                      - 'complexity': Network complexity (NEAT)
                      - 'action_distribution': List of action counts
@@ -343,6 +385,8 @@ class Dashboard:
             if metrics:
                 self.metrics.record(**metrics)
                 is_graph_update = True
+                # Check mastery progress each time metrics arrive
+                self.check_mastery()
 
         # Draw the background (clears previous frame)
         self._draw_background()
@@ -652,7 +696,7 @@ class Dashboard:
         algo_names = {'neat': 'NEAT', 'ppo': 'PPO', 'dqn': 'DQN'}
         algo_display = algo_names.get(self.algorithm, self.algorithm.upper())
         title_text = self._title_font.render(
-            f'Mario ML Dashboard  -  {algo_display}',
+            f'{self.game_name}  -  {algo_display} Training',
             True, ACCENT_COLOR,
         )
         title_x = (self.window_width - title_text.get_width()) // 2
@@ -679,16 +723,28 @@ class Dashboard:
         # Build status text from current metrics
         episode = self.metrics.episode_count
         reward = self.metrics.get_latest('reward')
-        distance = self.metrics.get_latest('distance')
         best_reward = self.metrics.get_best('reward')
-        best_distance = self.metrics.get_best('distance')
+
+        # Get the game-specific secondary metric
+        metric_key = self.dashboard_config.get('status_metric_key', 'distance')
+        metric_label = self.dashboard_config.get('status_metric_label', 'Distance')
+        metric_val = self.metrics.get_latest(metric_key)
+        best_metric = self.metrics.get_best(metric_key)
 
         # Current stats (left side)
         ep_label = 'Gen' if self.algorithm == 'neat' else 'Ep'
+        # Format metric value: use percentage for rates, integer for counts
+        if 'rate' in metric_key.lower():
+            metric_str = f'{metric_val:.1%}' if metric_val else '0.0%'
+            best_metric_str = f'{best_metric:.1%}' if best_metric else '0.0%'
+        else:
+            metric_str = f'{metric_val:.0f}'
+            best_metric_str = f'{best_metric:.0f}'
+
         current_text = (
             f'{ep_label}: {episode}  |  '
             f'Reward: {reward:.0f}  |  '
-            f'Distance: {distance:.0f}'
+            f'{metric_label}: {metric_str}'
         )
 
         # Algorithm-specific extras
@@ -708,7 +764,12 @@ class Dashboard:
         self.screen.blit(current_surface, (15, text_y))
 
         # Best stats (right side)
-        best_text = f'Best Reward: {best_reward:.0f}  |  Best Dist: {best_distance:.0f}'
+        best_text = f'Best Reward: {best_reward:.0f}  |  Best {metric_label}: {best_metric_str}'
+
+        # Mastery progress indicator
+        if self.completion_criteria and self._mastery_progress > 0:
+            pct = min(100, int(self._mastery_progress * 100))
+            best_text += f'  |  Mastery: {pct}%'
         best_surface = self._status_font.render(
             best_text, True, ACCENT_COLOR,
         )

@@ -1,7 +1,7 @@
 """
-Algorithms module for Super Mario Bros ML.
+Algorithms module for ML Training.
 
-Contains three ML algorithm implementations, each following the
+Contains ML algorithm implementations, each following the
 BaseTrainer interface for consistent training, evaluation, and
 model saving/loading.
 
@@ -12,4 +12,6 @@ Algorithms:
           using stable-baselines3.
     DQN:  Deep Q-Network - value-based RL with experience replay
           and target networks, custom PyTorch implementation.
+    A2C:  Advantage Actor-Critic - synchronous variant of A3C using
+          stable-baselines3.
 """

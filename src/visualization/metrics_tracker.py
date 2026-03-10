@@ -1,5 +1,5 @@
 """
-Metrics Tracker for Super Mario Bros ML.
+Metrics Tracker for ML Training.
 
 Collects, stores, and provides access to training metrics across all
 algorithms. Metrics are stored in memory for real-time graph updates

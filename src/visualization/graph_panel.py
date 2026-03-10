@@ -1,5 +1,5 @@
 """
-Graph Panel for Super Mario Bros ML Dashboard.
+Graph Panel for ML Training Dashboard.
 
 Renders real-time updating matplotlib graphs to pygame surfaces.
 Uses matplotlib's Agg backend (non-interactive) to render plots to
@@ -7,7 +7,7 @@ raw pixel buffers, which are then displayed via pygame.
 
 The panel shows 4 graphs in a 2x2 grid:
     - Top Left: Reward over episodes/generations (with rolling average)
-    - Top Right: Distance progression (how far Mario gets)
+    - Top Right: Game-specific metric (distance, score, win rate, etc.)
     - Bottom Left: Loss or network complexity (algorithm-dependent)
     - Bottom Right: Action distribution (bar chart)
 
@@ -63,8 +63,8 @@ COLORS = {
     'accent': '#00ff88',       # Neon green accent
 }
 
-# Action labels for the bar chart
-ACTION_LABELS = ['NOOP', 'Right', 'JmpR', 'RunR', 'RJmpR', 'Jump', 'Left']
+# Default action labels (generic fallback; overridden per game via adapter)
+DEFAULT_ACTION_LABELS = ['A0', 'A1', 'A2', 'A3', 'A4', 'A5', 'A6']
 
 
 class GraphPanel:
@@ -79,6 +79,8 @@ class GraphPanel:
         height: Panel height in pixels. Default 600.
         algorithm: Algorithm name ('neat', 'ppo', 'dqn') to customize
                    graph labels. Default 'neat'.
+        action_labels: List of action names for the bar chart.
+        dashboard_config: Dict with graph_2_title, graph_2_metric, etc.
 
     Attributes:
         fig: Matplotlib figure containing all subplots.
@@ -91,10 +93,17 @@ class GraphPanel:
         width: int = 700,
         height: int = 600,
         algorithm: str = 'neat',
+        action_labels: Optional[List[str]] = None,
+        dashboard_config: Optional[Dict] = None,
     ):
         self.width = width
         self.height = height
         self.algorithm = algorithm
+        self.action_labels = action_labels or list(DEFAULT_ACTION_LABELS)
+        self.dashboard_config = dashboard_config or {
+            'graph_2_title': 'Distance (x position)',
+            'graph_2_metric': 'distance',
+        }
         self._needs_update = True
 
         # Convert pixel dimensions to inches for matplotlib
@@ -152,10 +161,11 @@ class GraphPanel:
         self.axes['reward'].set_xlabel(x_label, **label_props)
         self.axes['reward'].set_ylabel('Reward', **label_props)
 
-        # Distance graph
-        self.axes['distance'].set_title('Distance (x position)', **title_props)
+        # Graph 2: game-specific metric (distance, score, win rate, etc.)
+        graph_2_title = self.dashboard_config.get('graph_2_title', 'Distance (x position)')
+        self.axes['distance'].set_title(graph_2_title, **title_props)
         self.axes['distance'].set_xlabel(x_label, **label_props)
-        self.axes['distance'].set_ylabel('Distance', **label_props)
+        self.axes['distance'].set_ylabel(graph_2_title.split('(')[0].strip(), **label_props)
 
         # Loss / Complexity graph (changes based on algorithm)
         if self.algorithm == 'neat':
@@ -210,36 +220,69 @@ class GraphPanel:
         ax.set_xlabel(x_label, color=COLORS['text'], fontsize=8)
         ax.tick_params(colors=COLORS['text'], labelsize=7)
 
-        # --- Distance Graph ---
+        # --- Graph 2: Game-Specific Metric (Distance / Score / Win Rate) ---
         ax = self.axes['distance']
         ax.clear()
         ax.set_facecolor(COLORS['panel_bg'])
         ax.grid(True, alpha=0.2, color=COLORS['grid'])
 
-        distances = tracker.get_values('distance')
-        if distances:
-            episodes = list(range(1, len(distances) + 1))
-            # Area fill for visual impact
-            ax.fill_between(
-                episodes, distances,
-                color=COLORS['distance_fill'], alpha=0.3, zorder=2,
-            )
-            # Main line
-            avg_dist = tracker.get_rolling_average('distance', window=10)
-            ax.plot(
-                episodes, avg_dist,
-                color=COLORS['accent'], linewidth=2, zorder=3,
-            )
-            # Best distance marker
-            if distances:
-                best_idx = distances.index(max(distances))
-                ax.scatter(
-                    [best_idx + 1], [max(distances)],
-                    color=COLORS['accent'], s=50, zorder=4,
-                    marker='*', edgecolors='white', linewidths=0.5,
+        graph_2_metric = self.dashboard_config.get('graph_2_metric', 'distance')
+        graph_2_title = self.dashboard_config.get('graph_2_title', 'Distance (x position)')
+        secondary_metric = self.dashboard_config.get('graph_2_secondary_metric')
+        legend_labels = self.dashboard_config.get('graph_2_legend')
+
+        values = tracker.get_values(graph_2_metric)
+        if values:
+            episodes = list(range(1, len(values) + 1))
+
+            if secondary_metric:
+                # Dual-line mode (e.g. agent vs opponent win rate)
+                avg_vals = tracker.get_rolling_average(graph_2_metric, window=10)
+                label_1 = legend_labels[0] if legend_labels else graph_2_metric
+                ax.plot(
+                    episodes, avg_vals,
+                    color=COLORS['accent'], linewidth=2, zorder=3,
+                    label=label_1,
                 )
 
-        ax.set_title('Distance (x position)', color=COLORS['text'],
+                sec_values = tracker.get_values(secondary_metric)
+                if sec_values:
+                    sec_episodes = list(range(1, len(sec_values) + 1))
+                    sec_avg = tracker.get_rolling_average(secondary_metric, window=10)
+                    label_2 = legend_labels[1] if legend_labels and len(legend_labels) > 1 else secondary_metric
+                    ax.plot(
+                        sec_episodes, sec_avg,
+                        color=COLORS['reward'], linewidth=2, zorder=3,
+                        label=label_2,
+                    )
+
+                ax.legend(
+                    loc='upper left', fontsize=7,
+                    facecolor=COLORS['panel_bg'],
+                    edgecolor=COLORS['grid'],
+                    labelcolor=COLORS['text'],
+                )
+            else:
+                # Single-metric mode with area fill
+                ax.fill_between(
+                    episodes, values,
+                    color=COLORS['distance_fill'], alpha=0.3, zorder=2,
+                )
+                avg_vals = tracker.get_rolling_average(graph_2_metric, window=10)
+                ax.plot(
+                    episodes, avg_vals,
+                    color=COLORS['accent'], linewidth=2, zorder=3,
+                )
+                # Best value marker
+                if values:
+                    best_idx = values.index(max(values))
+                    ax.scatter(
+                        [best_idx + 1], [max(values)],
+                        color=COLORS['accent'], s=50, zorder=4,
+                        marker='*', edgecolors='white', linewidths=0.5,
+                    )
+
+        ax.set_title(graph_2_title, color=COLORS['text'],
                      fontsize=10, fontweight='bold')
         ax.set_xlabel(x_label, color=COLORS['text'], fontsize=8)
         ax.tick_params(colors=COLORS['text'], labelsize=7)
@@ -331,7 +374,7 @@ class GraphPanel:
                     )
                 ax.set_xticks(range(len(latest)))
                 ax.set_xticklabels(
-                    ACTION_LABELS[:len(latest)],
+                    self.action_labels[:len(latest)],
                     rotation=30, fontsize=6,
                 )
 

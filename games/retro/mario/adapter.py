@@ -120,6 +120,23 @@ class MarioAdapter(BaseGameAdapter):
             'stage': (int, 1, 'Stage number 1-4'),
         }
 
+    def get_dashboard_config(self) -> dict:
+        return {
+            'graph_2_title': 'Distance (x position)',
+            'graph_2_metric': 'distance',
+            'graph_2_info_key': 'x_pos',
+            'status_metric_label': 'Distance',
+            'status_metric_key': 'distance',
+        }
+
+    def get_completion_criteria(self) -> dict:
+        return {
+            'metric': 'reward',
+            'threshold': 500.0,
+            'window': 50,
+            'description': 'Avg reward > 500 over 50 eps (stage completed)',
+        }
+
     def get_curriculum(self) -> Optional['CurriculumManager']:
         from src.training.curriculum import CurriculumManager
         return CurriculumManager()

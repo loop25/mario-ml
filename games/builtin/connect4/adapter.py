@@ -64,3 +64,22 @@ class ConnectFourAdapter(BaseGameAdapter):
             speed_bonus_multiplier=0.0,
             par_time_seconds=300.0,
         )
+
+    def get_dashboard_config(self) -> dict:
+        return {
+            'graph_2_title': 'Win Rate',
+            'graph_2_metric': 'win_rate',
+            'graph_2_info_key': 'winner',
+            'graph_2_secondary_metric': 'opponent_win_rate',
+            'graph_2_legend': ['Agent (Red)', 'Opponent (Yellow)'],
+            'status_metric_label': 'Win Rate',
+            'status_metric_key': 'win_rate',
+        }
+
+    def get_completion_criteria(self) -> dict:
+        return {
+            'metric': 'win_rate',
+            'threshold': 0.9,
+            'window': 100,
+            'description': 'Win rate > 90% over 100 games',
+        }
