@@ -17,4 +17,7 @@ Algorithms:
     Rainbow: Rainbow DQN - combines six DQN improvements (Double DQN,
              PER, Dueling, Noisy Nets, C51, Multi-step) into one agent.
              Custom PyTorch implementation with per-feature toggles.
+    DT:      Decision Transformer - GPT-2 style transformer treating RL as
+             sequence modeling. Trains offline on pre-collected trajectories
+             from multiple games to create a multi-game generalist agent.
 """

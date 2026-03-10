@@ -146,7 +146,7 @@ class BaseGameAdapter(ABC):
 
         Override to restrict. Default: all algorithms.
         """
-        return ['neat', 'ppo', 'dqn', 'a2c', 'rainbow']
+        return ['neat', 'ppo', 'dqn', 'a2c', 'rainbow', 'dt']
 
     # ---- Dashboard Configuration (optional) ----
 

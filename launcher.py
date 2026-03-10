@@ -107,6 +107,13 @@ ALGO_INFO = {
         "file_ext": [("PyTorch Model", "*.pt"), ("All Files", "*.*")],
         "model_subdir": "rainbow",
     },
+    "dt": {
+        "color": "#E67E22",
+        "duration_label": "Steps (×1000)",
+        "duration_default": "100",
+        "file_ext": [("PyTorch Model", "*.pt"), ("All Files", "*.*")],
+        "model_subdir": "generalist",
+    },
 }
 
 

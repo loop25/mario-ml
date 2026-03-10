@@ -79,8 +79,9 @@ Examples:
         type=str,
         required=False,
         default='dqn',
-        choices=['neat', 'ppo', 'dqn', 'a2c', 'rainbow'],
-        help='ML algorithm to use: neat, ppo, dqn, or a2c',
+        choices=['neat', 'ppo', 'dqn', 'a2c', 'rainbow', 'dt'],
+        help='ML algorithm to use: neat, ppo, dqn, a2c, rainbow, or dt '
+             '(decision transformer — multi-game generalist agent)',
     )
 
     # Game selection
@@ -306,6 +307,125 @@ def find_resume_checkpoint(algo_name, game_id, save_dir='models'):
     return None, None
 
 
+def _run_decision_transformer(args, registry, game_adapter):
+    """Run the Decision Transformer pipeline (offline multi-game training).
+
+    This is a separate path from the standard single-game training loop
+    because the DT:
+      1. Trains on pre-collected trajectories, not live environments
+      2. Can learn from multiple games simultaneously
+      3. Uses gradient-step-based training, not episode-based
+
+    Pipeline: Load config → Create ExperienceStore → Train DT → Evaluate
+    """
+    import yaml
+
+    project_root = os.path.dirname(os.path.abspath(__file__))
+    config_path = os.path.join(project_root, 'config', 'dt_config.yaml')
+    with open(config_path, 'r') as f:
+        config = yaml.safe_load(f)
+
+    # Override steps from CLI if provided
+    if args.episodes:
+        config['total_train_steps'] = args.episodes * 1000
+
+    # Device preference
+    device_pref = args.device if args.device != 'auto' else None
+
+    # Initialize Experience Store
+    from src.experience.experience_store import ExperienceStore
+    store_dir = config.get('store_dir', 'experience_store')
+    store = ExperienceStore(
+        store_dir=store_dir,
+        capacity=config.get('store_capacity', 50000),
+    )
+
+    print(f'\nExperience Store: {store_dir}')
+    print(f'  Trajectories: {len(store)}')
+    if len(store) > 0:
+        stats = store.get_stats()
+        print(f'  Games: {list(stats.get("per_game", {}).keys())}')
+        print(f'  Total timesteps: {stats.get("total_timesteps", 0):,}')
+    print()
+
+    # Dashboard (optional)
+    dashboard = None
+    if args.visualize:
+        from src.visualization.dashboard import Dashboard
+        dash_config = game_adapter.get_dashboard_config()
+        dash_config['primary_metric_name'] = 'Loss'
+        action_info = game_adapter.get_action_space_info()
+        dashboard = Dashboard(
+            num_actions=action_info.num_actions,
+            game_name='Decision Transformer',
+            action_labels=action_info.action_labels,
+            dashboard_config=dash_config,
+        )
+        print('Dashboard window opened.')
+
+    # Create DT Trainer
+    from src.algorithms.decision_transformer.dt_trainer import DTTrainer
+    trainer = DTTrainer(
+        config=config,
+        store=store,
+        visualizer=dashboard,
+        save_dir=config.get('save_dir', 'models/generalist'),
+        device_preference=device_pref,
+    )
+
+    # Load checkpoint if provided
+    if args.load:
+        print(f'Loading DT checkpoint: {args.load}')
+        trainer.load_checkpoint(args.load)
+        print('Checkpoint loaded.\n')
+
+    if args.eval:
+        # Evaluation: roll out in the selected game
+        print(f'Evaluating DT on {game_adapter.name}...')
+        from src.environment.universal_env import create_env_from_adapter
+        eval_env = create_env_from_adapter(game_adapter, **parse_game_opts(args.game_opts))
+        token_config = game_adapter.get_token_config()
+        target_return = config.get('eval_target_return_multiplier', 1.0)
+        # Scale by observed max return if available
+        if len(store) > 0:
+            stats = store.get_stats()
+            game_stats = stats.get('per_game', {}).get(
+                str(token_config.game_token_id), {}
+            )
+            max_ret = game_stats.get('max_return', 100.0)
+            target_return *= max_ret
+        else:
+            target_return *= 100.0  # Default target
+
+        mean_reward = trainer.evaluate_on_game(
+            env=eval_env,
+            game_token_id=token_config.game_token_id,
+            target_return=target_return,
+            num_episodes=config.get('eval_episodes', 5),
+            max_steps=config.get('eval_max_steps', 1000),
+        )
+        eval_env.close()
+        print(f'\nMean reward: {mean_reward:.1f}')
+    else:
+        # Training
+        if len(store) < config.get('min_episodes_to_train', 50):
+            print(
+                f'WARNING: Experience store has {len(store)} trajectories, '
+                f'but {config.get("min_episodes_to_train", 50)} are recommended '
+                f'before training. Consider collecting more experience first '
+                f'by training individual game agents.'
+            )
+            if len(store) == 0:
+                print('ERROR: Cannot train DT with empty experience store.')
+                print('  Run individual game agents first to collect trajectories,')
+                print('  then convert them to the experience store format.')
+                sys.exit(1)
+
+        trainer.train()
+
+    print('\nDecision Transformer pipeline complete.')
+
+
 def main():
     """Main entry point for training and evaluation."""
     args = parse_args()
@@ -373,6 +493,13 @@ def main():
     game_kwargs = parse_game_opts(args.game_opts)
     if game_kwargs:
         print(f'  Game options: {game_kwargs}')
+
+    # ================================================================
+    # Decision Transformer — separate pipeline (offline multi-game)
+    # ================================================================
+    if args.algorithm == 'dt':
+        _run_decision_transformer(args, registry, game_adapter)
+        return
 
     # ================================================================
     # Create Environment
