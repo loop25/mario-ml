@@ -99,6 +99,13 @@ ALGO_INFO = {
         "file_ext": [("SB3 Model", "*.zip"), ("All Files", "*.*")],
         "model_subdir": "a2c",
     },
+    "rainbow": {
+        "color": "#9B59B6",
+        "duration_label": "Episodes",
+        "duration_default": "5000",
+        "file_ext": [("PyTorch Model", "*.pt"), ("All Files", "*.*")],
+        "model_subdir": "rainbow",
+    },
 }
 
 
@@ -253,7 +260,7 @@ class MarioLauncher:
         # Store button references so we can restyle them on selection
         self.algo_buttons = {}
 
-        for algo in ["neat", "ppo", "dqn", "a2c"]:
+        for algo in ["neat", "ppo", "dqn", "a2c", "rainbow"]:
             btn = tk.Button(
                 btn_frame,
                 text=algo.upper(),

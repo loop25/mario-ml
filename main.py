@@ -79,7 +79,7 @@ Examples:
         type=str,
         required=False,
         default='dqn',
-        choices=['neat', 'ppo', 'dqn', 'a2c'],
+        choices=['neat', 'ppo', 'dqn', 'a2c', 'rainbow'],
         help='ML algorithm to use: neat, ppo, dqn, or a2c',
     )
 
@@ -500,6 +500,20 @@ def main():
             num_envs=num_envs,
         )
 
+    elif args.algorithm == 'rainbow':
+        from src.algorithms.rainbow.rainbow_trainer import RainbowTrainer
+        config_path = os.path.join(project_root, 'config', 'rainbow_config.yaml')
+        with open(config_path, 'r') as f:
+            config = yaml.safe_load(f)
+        trainer = RainbowTrainer(
+            env=env,
+            config=config,
+            visualizer=dashboard,
+            num_envs=num_envs,
+            world=args.world,
+            stage=args.stage,
+        )
+
     # Tag the trainer with the game so metadata.json records it.
     trainer.game_id = args.game
 
@@ -598,6 +612,12 @@ def main():
                     timesteps = config.get('total_timesteps', 1_000_000)
                     print(f'Training A2C for {timesteps:,} timesteps...\n')
                     trainer.train()
+
+                elif args.algorithm == 'rainbow':
+                    num_episodes = args.episodes or config.get('num_episodes', 5000)
+                    print(f'Training Rainbow DQN on World {current_world}-{current_stage} '
+                          f'for {num_episodes:,} episodes...\n')
+                    trainer.train(num_episodes=num_episodes)
 
                 # Check if we should advance to the next stage
                 if curriculum:
