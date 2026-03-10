@@ -198,6 +198,9 @@ class Dashboard:
         self._genome_progress = ''  # e.g. "23/50"
         self._genome_reward = 0.0   # reward of the last evaluated genome
 
+        # Training target for progress bar (set via set_training_target())
+        self._training_target = 0
+
         # Initialize fonts
         self._title_font = None
         self._status_font = None
@@ -327,6 +330,15 @@ class Dashboard:
         avg = sum(recent) / len(recent)
         self._mastery_progress = min(1.0, avg / threshold) if threshold > 0 else 0.0
         return self._mastery_progress
+
+    def set_training_target(self, total_episodes: int) -> None:
+        """Set the total training target for the progress bar.
+
+        Args:
+            total_episodes: Total episodes, generations, or steps expected.
+                           The progress bar fills as episode_count approaches this.
+        """
+        self._training_target = max(0, total_episodes)
 
     def _send_stream_frame(self) -> None:
         """Capture the current screen and send it to the streaming pipeline."""
@@ -687,10 +699,20 @@ class Dashboard:
         self.screen.fill(BG_COLOR)
 
     def _draw_title_bar(self) -> None:
-        """Draw the top title bar with algorithm name and elapsed time."""
+        """Draw the top title bar with algorithm name, elapsed time, and streaming info."""
         # Background
         title_rect = pygame.Rect(0, 0, self.window_width, self.top_bar_height)
         pygame.draw.rect(self.screen, TOP_BAR_COLOR, title_rect)
+
+        # Animated "LIVE" indicator on the far left (pulses when training)
+        if not self.is_paused and self.metrics.episode_count > 0:
+            # Pulse the dot brightness using a sine wave
+            pulse = abs(int(time.time() * 3) % 2)  # Blink every ~0.33s
+            dot_color = (255, 50, 50) if pulse else (180, 30, 30)
+            dot_y = self.top_bar_height // 2
+            pygame.draw.circle(self.screen, dot_color, (20, dot_y), 5)
+            live_text = self._label_font.render('LIVE', True, (255, 80, 80))
+            self.screen.blit(live_text, (30, dot_y - live_text.get_height() // 2))
 
         # Title text (centered)
         algo_names = {'neat': 'NEAT', 'ppo': 'PPO', 'dqn': 'DQN'}
@@ -703,22 +725,50 @@ class Dashboard:
         title_y = (self.top_bar_height - title_text.get_height()) // 2
         self.screen.blit(title_text, (title_x, title_y))
 
-        # Elapsed time on the right
+        # Right side: elapsed time + training speed
         elapsed = self.metrics.get_elapsed_time_str()
-        time_text = self._label_font.render(
-            f'Time: {elapsed}', True, DIM_TEXT_COLOR,
-        )
+        speed = self._get_training_speed()
+        right_text = f'{speed}  |  {elapsed}'
+        time_text = self._label_font.render(right_text, True, DIM_TEXT_COLOR)
         time_y = (self.top_bar_height - time_text.get_height()) // 2
         self.screen.blit(
             time_text,
             (self.window_width - time_text.get_width() - 15, time_y),
         )
 
+    def _get_training_speed(self) -> str:
+        """Calculate episodes/sec or steps/sec throughput for display."""
+        elapsed_seconds = self.metrics.get_elapsed_time()
+        if elapsed_seconds < 1:
+            return ''
+        ep_count = self.metrics.episode_count
+        if ep_count <= 0:
+            return ''
+        rate = ep_count / elapsed_seconds
+        if self.algorithm in ('ppo', 'a2c'):
+            return f'{rate:.0f} steps/s'
+        elif self.algorithm == 'dt':
+            return f'{rate:.0f} steps/s'
+        elif self.algorithm == 'neat':
+            return f'{rate:.1f} gen/s'
+        else:
+            return f'{rate:.1f} ep/s'
+
     def _draw_status_bar(self) -> None:
         """Draw the bottom status bar with current and best metrics."""
         y = self.window_height - self.bottom_bar_height
         bar_rect = pygame.Rect(0, y, self.window_width, self.bottom_bar_height)
         pygame.draw.rect(self.screen, BOTTOM_BAR_COLOR, bar_rect)
+
+        # Training progress bar (thin 3px bar at top of status bar)
+        if self._training_target > 0 and self.metrics.episode_count > 0:
+            progress = min(1.0, self.metrics.episode_count / self._training_target)
+            bar_w = int(self.window_width * progress)
+            progress_color = ACCENT_COLOR if progress < 1.0 else (255, 215, 0)
+            pygame.draw.rect(
+                self.screen, progress_color,
+                pygame.Rect(0, y, bar_w, 3),
+            )
 
         # Build status text from current metrics
         episode = self.metrics.episode_count

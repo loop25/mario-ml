@@ -356,11 +356,13 @@ def _run_decision_transformer(args, registry, game_adapter):
         dash_config['primary_metric_name'] = 'Loss'
         action_info = game_adapter.get_action_space_info()
         dashboard = Dashboard(
-            num_actions=action_info.num_actions,
+            algorithm='dt',
             game_name='Decision Transformer',
             action_labels=action_info.action_labels,
             dashboard_config=dash_config,
         )
+        total_steps = config.get('total_train_steps', 100000)
+        dashboard.set_training_target(total_steps)
         print('Dashboard window opened.')
 
     # Create DT Trainer
@@ -745,6 +747,20 @@ def main():
         _pg.event.pump()      # Process internal pygame events
         _pg.event.clear()     # Discard any queued events (incl. stale QUIT)
         dashboard.update()    # Render initial dashboard frame
+
+        # Set training target so the progress bar knows the total
+        if args.algorithm == 'neat':
+            target = args.episodes or 100
+        elif args.algorithm in ('ppo', 'a2c'):
+            if args.episodes:
+                target = args.episodes * 1000
+            else:
+                target = config.get('total_timesteps', 1_000_000)
+        elif args.algorithm in ('dqn', 'rainbow'):
+            target = args.episodes or config.get('num_episodes', 5000)
+        else:
+            target = 0
+        dashboard.set_training_target(target)
 
     if music_manager:
         music_manager.play()

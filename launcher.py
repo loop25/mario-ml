@@ -70,7 +70,7 @@ ACCENT_ORANGE = "#ff8c42"  # DQN color
 ACCENT_RED = "#ff4757"     # Stop button
 BORDER_COLOR = "#2a2a4a"   # Subtle borders
 
-# Algorithm-specific accent colors and file extensions
+# Algorithm-specific accent colors, file extensions, and user-facing info
 ALGO_INFO = {
     "neat": {
         "color": ACCENT_GREEN,
@@ -78,6 +78,16 @@ ALGO_INFO = {
         "duration_default": "100",
         "file_ext": [("NEAT Genome", "*.pkl"), ("All Files", "*.*")],
         "model_subdir": "neat",
+        "label": "NEAT",
+        "short_desc": "Evolves neural networks",
+        "tooltip": (
+            "NEAT (NeuroEvolution of Augmenting Topologies)\n"
+            "Evolves neural network structure through genetic algorithms.\n"
+            "Great for: visual learning, watching brains evolve live.\n"
+            "Speed: Fast per generation, needs many generations.\n"
+            "Best for: action games (Mario, Sonic) with small observation."
+        ),
+        "badge": None,  # No special badge
     },
     "ppo": {
         "color": ACCENT_BLUE,
@@ -85,6 +95,16 @@ ALGO_INFO = {
         "duration_default": "1000",
         "file_ext": [("SB3 Model", "*.zip"), ("All Files", "*.*")],
         "model_subdir": "ppo",
+        "label": "PPO",
+        "short_desc": "Best all-around agent",
+        "tooltip": (
+            "PPO (Proximal Policy Optimization)\n"
+            "State-of-the-art policy gradient method.\n"
+            "Great for: reliable training, GPU acceleration.\n"
+            "Speed: Moderate — steady improvement.\n"
+            "Best for: any game, most versatile single-game agent."
+        ),
+        "badge": "RECOMMENDED",
     },
     "dqn": {
         "color": ACCENT_ORANGE,
@@ -92,6 +112,16 @@ ALGO_INFO = {
         "duration_default": "5000",
         "file_ext": [("PyTorch Model", "*.pt"), ("All Files", "*.*")],
         "model_subdir": "dqn",
+        "label": "DQN",
+        "short_desc": "Classic deep Q-learning",
+        "tooltip": (
+            "DQN (Deep Q-Network)\n"
+            "Learns action values from experience replay.\n"
+            "Great for: discrete action games, stable learning.\n"
+            "Speed: Slow start, then rapid improvement.\n"
+            "Best for: games with clear goals (Mario, Snake)."
+        ),
+        "badge": None,
     },
     "a2c": {
         "color": ACCENT_GREEN,
@@ -99,6 +129,16 @@ ALGO_INFO = {
         "duration_default": "1000",
         "file_ext": [("SB3 Model", "*.zip"), ("All Files", "*.*")],
         "model_subdir": "a2c",
+        "label": "A2C",
+        "short_desc": "Fast parallel training",
+        "tooltip": (
+            "A2C (Advantage Actor-Critic)\n"
+            "Combines value estimation with policy learning.\n"
+            "Great for: fast training with multiple envs.\n"
+            "Speed: Fast — synchronous parallel updates.\n"
+            "Best for: action games with GPU available."
+        ),
+        "badge": None,
     },
     "rainbow": {
         "color": "#9B59B6",
@@ -106,6 +146,16 @@ ALGO_INFO = {
         "duration_default": "5000",
         "file_ext": [("PyTorch Model", "*.pt"), ("All Files", "*.*")],
         "model_subdir": "rainbow",
+        "label": "Rainbow",
+        "short_desc": "6 DQN improvements combined",
+        "tooltip": (
+            "Rainbow DQN (6 improvements in one)\n"
+            "Combines: Double DQN, PER, Dueling, Noisy Nets, C51, Multi-step.\n"
+            "Great for: maximum single-game performance.\n"
+            "Speed: Slow but achieves highest scores.\n"
+            "Best for: competitive play, beating high scores."
+        ),
+        "badge": "BEST SCORE",
     },
     "dt": {
         "color": "#E67E22",
@@ -113,6 +163,17 @@ ALGO_INFO = {
         "duration_default": "100",
         "file_ext": [("PyTorch Model", "*.pt"), ("All Files", "*.*")],
         "model_subdir": "generalist",
+        "label": "DT",
+        "short_desc": "Multi-game generalist AI",
+        "tooltip": (
+            "Decision Transformer (Generalist Agent)\n"
+            "A GPT-2 style transformer that learns from all games at once.\n"
+            "Great for: building one AI that plays every game.\n"
+            "Speed: Trains offline on collected experience.\n"
+            "Requires: Pre-collected data from other agents.\n"
+            "This is the ULTIMATE AGENT — trains on all games combined!"
+        ),
+        "badge": "ULTIMATE",
     },
 }
 
@@ -131,7 +192,7 @@ class MarioLauncher:
         # Window setup
         # ---------------------------------------------------------------
         self.root = tk.Tk()
-        self.root.title("Mario ML Launcher")
+        self.root.title("Game AI Training Studio")
         self.root.configure(bg=BG_DARK)
         self.root.resizable(False, False)
 
@@ -211,7 +272,7 @@ class MarioLauncher:
 
         title = tk.Label(
             header,
-            text="Super Mario Bros ML",
+            text="Game AI Training Studio",
             font=("Segoe UI", 20, "bold"),
             fg=ACCENT_GREEN,
             bg=BG_MEDIUM,
@@ -220,7 +281,7 @@ class MarioLauncher:
 
         subtitle = tk.Label(
             header,
-            text="Training Launcher",
+            text="Train AI agents to play games — no coding required",
             font=("Segoe UI", 11),
             fg=TEXT_DIM,
             bg=BG_MEDIUM,
@@ -258,13 +319,24 @@ class MarioLauncher:
         section = tk.Frame(self.root, bg=BG_DARK, pady=10, padx=25)
         section.pack(fill="x")
 
+        game_header = tk.Frame(section, bg=BG_DARK)
+        game_header.pack(fill="x")
+
         tk.Label(
-            section,
+            game_header,
             text="Game",
             font=("Segoe UI", 10),
             fg=TEXT_DIM,
             bg=BG_DARK,
-        ).pack(anchor="w")
+        ).pack(side="left")
+
+        tk.Label(
+            game_header,
+            text="Choose which game the AI will learn to play",
+            font=("Segoe UI", 8),
+            fg=TEXT_DIM,
+            bg=BG_DARK,
+        ).pack(side="left", padx=(10, 0))
 
         game_names = [f"{g.name} ({g.game_id})" for g in self.available_games]
         if not game_names:
@@ -284,19 +356,31 @@ class MarioLauncher:
         self._rebuild_game_options()
 
     def _build_algorithm_selector(self):
-        """Toggle buttons for NEAT / PPO / DQN / A2C."""
+        """Toggle buttons for all algorithms with descriptions and badges."""
         section = tk.Frame(self.root, bg=BG_DARK, pady=10, padx=25)
         section.pack(fill="x")
 
-        label = tk.Label(
-            section,
+        # Header row: label + help hint
+        header_row = tk.Frame(section, bg=BG_DARK)
+        header_row.pack(fill="x")
+
+        tk.Label(
+            header_row,
             text="Algorithm",
             font=("Segoe UI", 10),
             fg=TEXT_DIM,
             bg=BG_DARK,
-        )
-        label.pack(anchor="w")
+        ).pack(side="left")
 
+        tk.Label(
+            header_row,
+            text="(hover for details)",
+            font=("Segoe UI", 8),
+            fg=TEXT_DIM,
+            bg=BG_DARK,
+        ).pack(side="left", padx=(8, 0))
+
+        # Top row: single-game algorithms
         btn_frame = tk.Frame(section, bg=BG_DARK)
         btn_frame.pack(fill="x", pady=(5, 0))
 
@@ -304,21 +388,117 @@ class MarioLauncher:
         self.algo_buttons = {}
 
         for algo in ["neat", "ppo", "dqn", "a2c", "rainbow"]:
+            info = ALGO_INFO[algo]
+            btn_container = tk.Frame(btn_frame, bg=BG_DARK)
+            btn_container.pack(side="left", expand=True, fill="x", padx=2)
+
             btn = tk.Button(
-                btn_frame,
-                text=algo.upper(),
-                font=("Segoe UI", 12, "bold"),
-                width=10,
+                btn_container,
+                text=info["label"],
+                font=("Segoe UI", 11, "bold"),
                 cursor="hand2",
                 relief="flat",
                 bd=0,
                 command=lambda a=algo: self._select_algorithm(a),
             )
-            btn.pack(side="left", expand=True, fill="x", padx=3)
+            btn.pack(fill="x")
             self.algo_buttons[algo] = btn
+
+            # Badge label (RECOMMENDED, BEST SCORE, etc.)
+            if info.get("badge"):
+                badge = tk.Label(
+                    btn_container,
+                    text=info["badge"],
+                    font=("Segoe UI", 7, "bold"),
+                    fg=info["color"],
+                    bg=BG_DARK,
+                )
+                badge.pack()
+
+            # Bind tooltip hover for the button
+            self._bind_tooltip(btn, info["tooltip"])
+
+        # Bottom row: generalist agent (DT) — given special prominence
+        dt_frame = tk.Frame(section, bg=BG_DARK)
+        dt_frame.pack(fill="x", pady=(6, 0))
+
+        dt_info = ALGO_INFO["dt"]
+        dt_btn = tk.Button(
+            dt_frame,
+            text="DT — Decision Transformer (Generalist Agent)",
+            font=("Segoe UI", 10, "bold"),
+            cursor="hand2",
+            relief="flat",
+            bd=0,
+            command=lambda: self._select_algorithm("dt"),
+        )
+        dt_btn.pack(fill="x")
+        self.algo_buttons["dt"] = dt_btn
+
+        dt_badge = tk.Label(
+            dt_frame,
+            text="ULTIMATE AGENT — One AI that plays ALL games",
+            font=("Segoe UI", 8, "bold"),
+            fg=dt_info["color"],
+            bg=BG_DARK,
+        )
+        dt_badge.pack()
+        self._bind_tooltip(dt_btn, dt_info["tooltip"])
+
+        # Description label that updates on selection
+        self.algo_desc_label = tk.Label(
+            section,
+            text="",
+            font=("Segoe UI", 9),
+            fg=TEXT_DIM,
+            bg=BG_DARK,
+            wraplength=500,
+            justify="left",
+        )
+        self.algo_desc_label.pack(anchor="w", pady=(4, 0))
+        self._update_algo_desc()
 
         # Apply initial styling
         self._update_algo_buttons()
+
+    def _update_algo_desc(self):
+        """Update the algorithm description text below the buttons."""
+        algo = self.selected_algo.get()
+        info = ALGO_INFO[algo]
+        self.algo_desc_label.configure(
+            text=info["short_desc"],
+            fg=info["color"],
+        )
+
+    def _bind_tooltip(self, widget, text):
+        """Bind hover tooltip to a widget using a floating label."""
+        def show_tip(event):
+            tip = tk.Toplevel(widget)
+            tip.wm_overrideredirect(True)
+            tip.wm_geometry(f"+{event.x_root + 15}+{event.y_root + 10}")
+            tip.configure(bg="#2a2a4a")
+            label = tk.Label(
+                tip,
+                text=text,
+                font=("Segoe UI", 9),
+                fg=TEXT_PRIMARY,
+                bg="#2a2a4a",
+                justify="left",
+                padx=10,
+                pady=6,
+                wraplength=350,
+            )
+            label.pack()
+            widget._tooltip = tip
+
+        def hide_tip(event):
+            tip = getattr(widget, '_tooltip', None)
+            if tip:
+                tip.destroy()
+                widget._tooltip = None
+
+        widget.bind('<Enter>', show_tip)
+        widget.bind('<Leave>', hide_tip)
 
     def _get_selected_adapter(self):
         """Return the game adapter for the currently selected game."""
@@ -427,12 +607,14 @@ class MarioLauncher:
                 self.model_path_var.set("")
                 self._update_model_display()
         self._update_algo_buttons()
+        self._update_algo_desc()
         self._rebuild_game_options()
 
     def _select_algorithm(self, algo):
         """Handle algorithm button click."""
         self.selected_algo.set(algo)
         self._update_algo_buttons()
+        self._update_algo_desc()
         self._update_duration_label()
         # Clear loaded model when switching algorithms
         self.model_path_var.set("")
@@ -577,7 +759,7 @@ class MarioLauncher:
         # Visualize checkbox
         viz_cb = tk.Checkbutton(
             section,
-            text="Show Live Visualization",
+            text="Show Live Dashboard  (watch the AI learn in real-time)",
             variable=self.visualize_var,
             font=("Segoe UI", 10),
             fg=TEXT_PRIMARY,
@@ -592,7 +774,7 @@ class MarioLauncher:
         # Record checkbox
         rec_cb = tk.Checkbutton(
             section,
-            text="Record Training Video",
+            text="Record Video  (saves MP4 of the training session)",
             variable=self.record_var,
             font=("Segoe UI", 10),
             fg=TEXT_PRIMARY,
@@ -942,7 +1124,7 @@ class MarioLauncher:
 
         self.status_label = tk.Label(
             section,
-            text="Ready. Select an algorithm and click START.",
+            text="Ready — Pick a game and algorithm, then click START to begin training!",
             font=("Segoe UI", 9),
             fg=TEXT_DIM,
             bg=BG_DARK,
@@ -1188,8 +1370,8 @@ class MarioLauncher:
                 val = int(duration)
                 if val <= 0:
                     raise ValueError
-                # For PPO, the GUI shows "×1000", so multiply
-                if algo == "ppo":
+                # For PPO/A2C/DT, the GUI shows "×1000", so multiply
+                if algo in ("ppo", "a2c", "dt"):
                     val = val * 1000
                 cmd.extend(["--episodes", str(val)])
             except ValueError:
