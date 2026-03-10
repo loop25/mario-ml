@@ -231,6 +231,7 @@ class MarioLauncher:
         )
         self.game_combo.pack(fill="x", pady=(3, 0))
         self.game_combo.set(game_names[0])
+        self.game_combo.bind("<<ComboboxSelected>>", self._on_game_changed)
 
     def _build_algorithm_selector(self):
         """Toggle buttons for NEAT / PPO / DQN / A2C."""
@@ -269,6 +270,29 @@ class MarioLauncher:
         # Apply initial styling
         self._update_algo_buttons()
 
+    def _get_selected_adapter(self):
+        """Return the game adapter for the currently selected game."""
+        game_text = self.game_combo.get()
+        game_id = game_text.rsplit("(", 1)[-1].rstrip(")").strip() if "(" in game_text else "mario"
+        try:
+            return self.game_registry.get_game(game_id)
+        except KeyError:
+            return None
+
+    def _on_game_changed(self, event=None):
+        """Handle game selection change — update algorithm compatibility."""
+        adapter = self._get_selected_adapter()
+        if adapter:
+            supported = adapter.supported_algorithms()
+            current = self.selected_algo.get()
+            # If current algo is no longer supported, switch to first supported
+            if current not in supported and supported:
+                self.selected_algo.set(supported[0])
+                self._update_duration_label()
+                self.model_path_var.set("")
+                self._update_model_display()
+        self._update_algo_buttons()
+
     def _select_algorithm(self, algo):
         """Handle algorithm button click."""
         self.selected_algo.set(algo)
@@ -279,15 +303,31 @@ class MarioLauncher:
         self._update_model_display()
 
     def _update_algo_buttons(self):
-        """Restyle algorithm buttons to show which is active."""
+        """Restyle algorithm buttons to show which is active.
+
+        Incompatible algorithms are grayed out and disabled.
+        """
         current = self.selected_algo.get()
+        adapter = self._get_selected_adapter()
+        supported = adapter.supported_algorithms() if adapter else list(ALGO_INFO.keys())
+
         for algo, btn in self.algo_buttons.items():
-            if algo == current:
+            if algo not in supported:
+                # Incompatible — gray out and disable
+                btn.configure(
+                    bg=BG_DARK, fg="#555555", activebackground=BG_DARK,
+                    state="disabled",
+                )
+            elif algo == current:
                 color = ALGO_INFO[algo]["color"]
-                btn.configure(bg=color, fg=BG_DARK, activebackground=color)
+                btn.configure(
+                    bg=color, fg=BG_DARK, activebackground=color,
+                    state="normal",
+                )
             else:
                 btn.configure(
-                    bg=BG_MEDIUM, fg=TEXT_DIM, activebackground=BG_LIGHT
+                    bg=BG_MEDIUM, fg=TEXT_DIM, activebackground=BG_LIGHT,
+                    state="normal",
                 )
 
     def _build_world_stage(self):
@@ -957,9 +997,12 @@ class MarioLauncher:
 
     def _disable_controls(self, disabled):
         """Enable/disable controls while training is running."""
-        state = "disabled" if disabled else "normal"
-        for btn in self.algo_buttons.values():
-            btn.configure(state=state)
+        if disabled:
+            for btn in self.algo_buttons.values():
+                btn.configure(state="disabled")
+        else:
+            # Re-enable only supported algorithms
+            self._update_algo_buttons()
 
     def _open_folder(self, path):
         """Open a folder in Windows Explorer."""

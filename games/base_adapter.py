@@ -11,7 +11,7 @@ game module, while the framework handles everything else
 (training loops, visualization, checkpointing).
 """
 from abc import ABC, abstractmethod
-from typing import Optional, Tuple
+from typing import List, Optional, Tuple
 
 import numpy as np
 import gym
@@ -135,6 +135,18 @@ class BaseGameAdapter(ABC):
             action_vocab_size=self.get_action_space_info().num_actions,
             game_token_id=hash(self.game_id) % 1024,
         )
+
+    # ---- Algorithm Compatibility (optional) ----
+
+    def supported_algorithms(self) -> List[str]:
+        """Return the list of algorithms this game supports.
+
+        NEAT requires a small, flat observation (e.g. 13x13 = 169 inputs).
+        Games with large image observations (84x84) should exclude 'neat'.
+
+        Override to restrict. Default: all algorithms.
+        """
+        return ['neat', 'ppo', 'dqn', 'a2c']
 
     # ---- For SB3 Algorithms (optional) ----
 

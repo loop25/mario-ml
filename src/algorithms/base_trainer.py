@@ -104,6 +104,10 @@ class BaseTrainer(ABC):
         # cross-cutting concerns that need per-episode notifications.
         self._episode_callbacks = []
 
+        # Game identity — set by main.py after trainer creation so
+        # metadata.json records which game produced this checkpoint.
+        self.game_id = None
+
         # Checkpoint settings (can be overridden in config)
         self.checkpoint_interval = config.get('save_freq', 50)
 
@@ -382,6 +386,7 @@ class BaseTrainer(ABC):
         """
         metadata = {
             'algorithm': self.__class__.__name__,
+            'game_id': self.game_id or 'mario',
             'episode': int(episode),
             'best_reward': float(self.best_reward),
             'best_distance': int(self.best_distance),

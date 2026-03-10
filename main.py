@@ -219,12 +219,18 @@ def next_world_stage(world: int, stage: int):
         return None  # All stages complete!
 
 
-def find_resume_checkpoint(algo_name, save_dir='models'):
+def find_resume_checkpoint(algo_name, game_id, save_dir='models'):
     """Find the latest final checkpoint for auto-resume.
 
     Checks models/{algo_name}/ for a metadata.json (written by
     BaseTrainer._save_metadata) and a corresponding final checkpoint
-    file.  Returns (checkpoint_path, metadata_dict) or (None, None).
+    file.  Only returns a match if the checkpoint was produced by
+    the same game (prevents loading e.g. a Mario model into Snake).
+
+    Old checkpoints without a game_id field are assumed to be 'mario'
+    for backwards compatibility.
+
+    Returns (checkpoint_path, metadata_dict) or (None, None).
     """
     algo_dir = os.path.join(save_dir, algo_name)
     metadata_path = os.path.join(algo_dir, 'metadata.json')
@@ -235,6 +241,11 @@ def find_resume_checkpoint(algo_name, save_dir='models'):
         with open(metadata_path, 'r') as f:
             metadata = json.load(f)
     except (json.JSONDecodeError, OSError):
+        return None, None
+
+    # Verify the checkpoint was trained on the same game.
+    checkpoint_game = metadata.get('game_id', 'mario')
+    if checkpoint_game != game_id:
         return None, None
 
     # Each algorithm saves its final model with a different extension.
@@ -273,6 +284,13 @@ def main():
         sys.exit(1)
 
     print(f'\nGame: {game_adapter.name} ({game_adapter.game_id})')
+
+    # Validate algorithm compatibility
+    supported = game_adapter.supported_algorithms()
+    if args.algorithm not in supported:
+        print(f'\nError: {game_adapter.name} does not support {args.algorithm.upper()}.')
+        print(f'  Supported algorithms: {", ".join(a.upper() for a in supported)}')
+        sys.exit(1)
 
     num_envs = max(1, args.num_envs)
 
@@ -472,6 +490,9 @@ def main():
             visualizer=dashboard,
         )
 
+    # Tag the trainer with the game so metadata.json records it.
+    trainer.game_id = args.game
+
     # ================================================================
     # Load Checkpoint (explicit or auto-resume)
     # ================================================================
@@ -481,7 +502,8 @@ def main():
         print('Checkpoint loaded successfully.\n')
     elif not args.eval:
         # Auto-resume: check for an existing training session
-        resume_path, resume_meta = find_resume_checkpoint(args.algorithm)
+        # Only resume if the checkpoint was trained on the same game.
+        resume_path, resume_meta = find_resume_checkpoint(args.algorithm, args.game)
         if resume_path:
             ep = resume_meta.get('episode', '?')
             best = resume_meta.get('best_reward', '?')

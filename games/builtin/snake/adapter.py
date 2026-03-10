@@ -1,5 +1,5 @@
 """Snake game adapter for the plugin registry."""
-from typing import Tuple
+from typing import List, Tuple
 
 import gym
 
@@ -63,6 +63,10 @@ class SnakeAdapter(BaseGameAdapter):
             speed_bonus_multiplier=1.0,
             par_time_seconds=60.0,
         )
+
+    def supported_algorithms(self) -> List[str]:
+        # NEAT requires small flat obs (13x13); Snake uses 84x84 images.
+        return ['ppo', 'dqn', 'a2c']
 
     def get_game_specific_options(self) -> dict:
         return {

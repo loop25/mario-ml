@@ -81,6 +81,99 @@ class TestConnectFourEndToEnd:
         env.close()
 
 
+class TestAlgorithmCompatibility:
+    """Verify supported_algorithms() is correct for each game."""
+
+    def test_snake_excludes_neat(self):
+        registry = GameRegistry()
+        registry.discover()
+        adapter = registry.get_game('snake')
+        supported = adapter.supported_algorithms()
+        assert 'neat' not in supported
+        assert 'ppo' in supported
+        assert 'dqn' in supported
+        assert 'a2c' in supported
+
+    def test_connect4_excludes_neat(self):
+        registry = GameRegistry()
+        registry.discover()
+        adapter = registry.get_game('connect4')
+        supported = adapter.supported_algorithms()
+        assert 'neat' not in supported
+        assert 'ppo' in supported
+
+    @pytest.mark.skipif(not _HAS_MARIO, reason='gym-super-mario-bros not installed')
+    def test_mario_supports_all(self):
+        registry = GameRegistry()
+        registry.discover()
+        adapter = registry.get_game('mario')
+        supported = adapter.supported_algorithms()
+        assert 'neat' in supported
+        assert 'ppo' in supported
+        assert 'dqn' in supported
+        assert 'a2c' in supported
+
+    def test_all_adapters_return_list(self):
+        registry = GameRegistry()
+        registry.discover()
+        for adapter in registry.list_games():
+            supported = adapter.supported_algorithms()
+            assert isinstance(supported, list)
+            assert len(supported) > 0
+
+
+class TestGameAwareAutoResume:
+    """Verify find_resume_checkpoint filters by game_id."""
+
+    def test_skips_checkpoint_from_different_game(self, tmp_path):
+        import json
+        from main import find_resume_checkpoint
+        # Create a fake checkpoint from mario
+        algo_dir = tmp_path / 'ppo'
+        algo_dir.mkdir()
+        (algo_dir / 'metadata.json').write_text(json.dumps({
+            'algorithm': 'PPOTrainer',
+            'game_id': 'mario',
+            'episode': 100,
+        }))
+        (algo_dir / 'final.zip').write_text('fake')
+        # Should NOT match when looking for snake
+        path, meta = find_resume_checkpoint('ppo', 'snake', save_dir=str(tmp_path))
+        assert path is None
+
+    def test_matches_checkpoint_from_same_game(self, tmp_path):
+        import json
+        from main import find_resume_checkpoint
+        algo_dir = tmp_path / 'ppo'
+        algo_dir.mkdir()
+        (algo_dir / 'metadata.json').write_text(json.dumps({
+            'algorithm': 'PPOTrainer',
+            'game_id': 'snake',
+            'episode': 100,
+        }))
+        (algo_dir / 'final.zip').write_text('fake')
+        path, meta = find_resume_checkpoint('ppo', 'snake', save_dir=str(tmp_path))
+        assert path is not None
+        assert 'final.zip' in path
+
+    def test_old_checkpoint_without_game_id_matches_mario(self, tmp_path):
+        import json
+        from main import find_resume_checkpoint
+        algo_dir = tmp_path / 'neat'
+        algo_dir.mkdir()
+        (algo_dir / 'metadata.json').write_text(json.dumps({
+            'algorithm': 'NEATTrainer',
+            'episode': 50,
+        }))
+        (algo_dir / 'final_best_genome.pkl').write_text('fake')
+        # Old checkpoints (no game_id) default to 'mario'
+        path, meta = find_resume_checkpoint('neat', 'mario', save_dir=str(tmp_path))
+        assert path is not None
+        # But should NOT match for other games
+        path2, _ = find_resume_checkpoint('neat', 'connect4', save_dir=str(tmp_path))
+        assert path2 is None
+
+
 class TestAllAdaptersConformToInterface:
     """Verify every discovered adapter implements the full interface."""
 

@@ -1,5 +1,5 @@
 """Connect Four adapter for the plugin registry."""
-from typing import Tuple
+from typing import List, Tuple
 
 import gym
 
@@ -50,6 +50,10 @@ class ConnectFourAdapter(BaseGameAdapter):
             completed=info.get('winner', 0) == 1,
             time_elapsed=episode_time,
         )
+
+    def supported_algorithms(self) -> List[str]:
+        # NEAT requires small flat obs (13x13); Connect Four uses 84x84 images.
+        return ['ppo', 'dqn', 'a2c']
 
     def get_reward_config(self) -> RewardConfig:
         return RewardConfig(
