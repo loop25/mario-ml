@@ -1,4 +1,4 @@
-"""Connect Four adapter for the plugin registry."""
+"""Checkers adapter for the plugin registry."""
 from typing import List, Tuple
 
 import gym
@@ -9,19 +9,19 @@ from games.reward_config import (
     RewardConfig,
     ActionSpaceInfo,
 )
-from games.builtin.connect4.game import ConnectFourEnv
+from games.builtin.checkers.game import CheckersEnv, NUM_SQUARES
 
 
-class ConnectFourAdapter(BaseGameAdapter):
-    """Adapter for the built-in Connect Four game."""
+class CheckersAdapter(BaseGameAdapter):
+    """Adapter for the built-in Checkers game."""
 
     @property
     def name(self) -> str:
-        return 'Connect Four'
+        return 'Checkers'
 
     @property
     def game_id(self) -> str:
-        return 'connect4'
+        return 'checkers'
 
     @property
     def category(self) -> str:
@@ -29,40 +29,43 @@ class ConnectFourAdapter(BaseGameAdapter):
 
     @property
     def description(self) -> str:
-        return 'Drop pieces to get four in a row — vertical, horizontal, or diagonal.'
+        return 'Classic checkers — capture all opponent pieces to win.'
 
     def create_env(self, **kwargs) -> gym.Env:
-        return ConnectFourEnv()
+        return CheckersEnv()
 
     def get_action_space_info(self) -> ActionSpaceInfo:
         return ActionSpaceInfo(
-            num_actions=7,
-            action_labels=[f'Col {i+1}' for i in range(7)],
+            num_actions=NUM_SQUARES * NUM_SQUARES,
+            action_labels=[f'{i}->{j}' for i in range(NUM_SQUARES)
+                           for j in range(NUM_SQUARES)],
         )
 
     def get_observation_shape(self) -> Tuple[int, ...]:
         return (84, 84, 1)
 
     def extract_metrics(self, info: dict, episode_time: float) -> StandardMetrics:
+        p1 = info.get('p1_pieces', 0)
+        p2 = info.get('p2_pieces', 0)
+        total = p1 + p2 if (p1 + p2) > 0 else 1
         return StandardMetrics(
-            progress=info.get('pieces_played', 0) / 42,
+            progress=1.0 - (p2 / 12),
             score=float(1 if info.get('winner') == 1 else 0),
             completed=info.get('winner', 0) == 1,
             time_elapsed=episode_time,
         )
 
     def supported_algorithms(self) -> List[str]:
-        # NEAT requires small flat obs (13x13); Connect Four uses 84x84 images.
         return ['ppo', 'dqn', 'a2c', 'rainbow']
 
     def get_reward_config(self) -> RewardConfig:
         return RewardConfig(
-            time_penalty_per_second=0.0,   # Board game — thinking is fine
+            time_penalty_per_second=0.0,
             completion_bonus=50.0,
             death_penalty=-10.0,
             idle_penalty_per_second=0.0,
             speed_bonus_multiplier=0.0,
-            par_time_seconds=300.0,
+            par_time_seconds=600.0,
         )
 
     def get_dashboard_config(self) -> dict:
@@ -71,7 +74,7 @@ class ConnectFourAdapter(BaseGameAdapter):
             'graph_2_metric': 'win_rate',
             'graph_2_info_key': 'winner',
             'graph_2_secondary_metric': 'opponent_win_rate',
-            'graph_2_legend': ['Agent (Red)', 'Opponent (Yellow)'],
+            'graph_2_legend': ['Agent (Dark)', 'Opponent (Red)'],
             'status_metric_label': 'Win Rate',
             'status_metric_key': 'win_rate',
         }
@@ -79,7 +82,7 @@ class ConnectFourAdapter(BaseGameAdapter):
     def get_completion_criteria(self) -> dict:
         return {
             'metric': 'win_rate',
-            'threshold': 0.9,
+            'threshold': 0.8,
             'window': 100,
-            'description': 'Win rate > 90% over 100 games',
+            'description': 'Win rate > 80% over 100 games',
         }
