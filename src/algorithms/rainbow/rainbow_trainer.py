@@ -32,6 +32,7 @@ import torch.optim as optim
 from typing import Dict, Any, Optional
 
 from src.algorithms.base_trainer import BaseTrainer
+from src.algorithms.device import select_device
 from src.algorithms.rainbow.rainbow_network import RainbowNetwork
 from src.algorithms.rainbow.prioritized_replay import (
     PrioritizedReplayBuffer,
@@ -69,14 +70,17 @@ class RainbowTrainer(BaseTrainer):
         num_envs: int = 1,
         world: int = 1,
         stage: int = 1,
+        device_preference: Optional[str] = None,
     ):
         super().__init__(env, config, visualizer, save_dir, log_dir)
 
         self.world = world
         self.stage = stage
 
-        # Device selection (reuses DQN pattern with CUDA smoke test)
-        self.device = self._select_device()
+        # Centralized device selection with auto-detection
+        self.device = select_device(
+            preference=device_preference, algo_name='Rainbow'
+        )
 
         # Environment dimensions
         obs_shape = env.observation_space.shape  # (84, 84, 4) or (4, 84, 84)
@@ -175,30 +179,6 @@ class RainbowTrainer(BaseTrainer):
         # Counters
         self.total_steps = 0
         self.n_actions = n_actions
-
-    @staticmethod
-    def _select_device() -> torch.device:
-        """Select CUDA if available and functional, otherwise CPU.
-
-        Runs a quick smoke test to catch GPUs that report CUDA
-        available but fail on actual kernel execution.
-        """
-        if not torch.cuda.is_available():
-            print('Rainbow using device: cpu')
-            return torch.device('cpu')
-        try:
-            a = torch.randn(4, 4, device='cuda')
-            _ = a @ a.T
-            del a
-            torch.cuda.empty_cache()
-            gpu = torch.cuda.get_device_name(0)
-            vram = torch.cuda.get_device_properties(0).total_mem
-            vram_gb = round(vram / 1024**3, 1)
-            print(f'Rainbow using device: cuda ({gpu}, {vram_gb}GB VRAM)')
-            return torch.device('cuda')
-        except RuntimeError:
-            print('Rainbow using device: cpu (CUDA kernels not supported)')
-            return torch.device('cpu')
 
     def _preprocess_observation(self, obs: np.ndarray) -> np.ndarray:
         """Convert HWC observation to CHW float32 [0, 1]."""

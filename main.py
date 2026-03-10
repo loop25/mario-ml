@@ -2,7 +2,7 @@
 ML Training Platform - Main Entry Point.
 
 Run this script to train or evaluate ML algorithms
-(NEAT, PPO, DQN, A2C) on any supported game with live visualization.
+(NEAT, PPO, DQN, A2C, Rainbow) on any supported game with live visualization.
 
 Usage:
     # Train NEAT with live dashboard:
@@ -202,6 +202,16 @@ Examples:
         default=[],
         help='Game-specific options as key=value pairs '
              '(e.g., --game-opts grid_size=16 speed=10)',
+    )
+
+    # Device selection
+    parser.add_argument(
+        '--device',
+        type=str,
+        default='auto',
+        choices=['auto', 'cuda', 'mps', 'cpu'],
+        help='Compute device: auto (detect best), cuda, mps, or cpu. '
+             'Default: auto (CUDA > MPS > CPU)',
     )
 
     return parser.parse_args()
@@ -512,6 +522,7 @@ def main():
             num_envs=num_envs,
             world=args.world,
             stage=args.stage,
+            device_preference=args.device,
         )
 
     elif args.algorithm == 'dqn':
@@ -526,6 +537,7 @@ def main():
             num_envs=num_envs,
             world=args.world,
             stage=args.stage,
+            device_preference=args.device,
         )
 
     elif args.algorithm == 'a2c':
@@ -538,6 +550,7 @@ def main():
             config=config,
             visualizer=dashboard,
             num_envs=num_envs,
+            device_preference=args.device,
         )
 
     elif args.algorithm == 'rainbow':
@@ -552,6 +565,7 @@ def main():
             num_envs=num_envs,
             world=args.world,
             stage=args.stage,
+            device_preference=args.device,
         )
 
     # Tag the trainer with the game so metadata.json records it.

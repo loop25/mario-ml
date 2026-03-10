@@ -35,6 +35,7 @@ import torch.optim as optim
 from typing import Dict, Any, Optional
 
 from src.algorithms.base_trainer import BaseTrainer
+from src.algorithms.device import select_device
 from src.algorithms.dqn.dqn_network import DQNNetwork
 from src.algorithms.dqn.replay_buffer import ReplayBuffer
 from src.visualization.dashboard import Dashboard
@@ -77,6 +78,7 @@ class DQNTrainer(BaseTrainer):
         num_envs: int = 1,
         world: int = 1,
         stage: int = 1,
+        device_preference: Optional[str] = None,
     ):
         super().__init__(env, config, visualizer, save_dir, log_dir)
 
@@ -84,10 +86,10 @@ class DQNTrainer(BaseTrainer):
         self.world = world
         self.stage = stage
 
-        # Device selection: Use GPU if available AND functional.
-        # Some GPUs (e.g. RTX 5070 Blackwell/sm_120) report CUDA as
-        # available but fail on actual kernel execution with cu124.
-        self.device = self._select_device()
+        # Centralized device selection with auto-detection
+        self.device = select_device(
+            preference=device_preference, algo_name='DQN'
+        )
 
         # Get environment dimensions
         obs_shape = env.observation_space.shape  # (84, 84, 4)
@@ -167,41 +169,6 @@ class DQNTrainer(BaseTrainer):
                 self.extra_envs.append(extra_env)
                 _pump()  # Keep window responsive
             print(f'  DQN: Created {num_envs} environments (round-robin, shared replay buffer)')
-
-    @staticmethod
-    def _select_device() -> torch.device:
-        """Select CUDA if available and functional, otherwise CPU.
-
-        Some GPUs (e.g. RTX 5070 Blackwell/sm_120) report
-        ``torch.cuda.is_available() == True`` but crash on actual
-        kernel execution with older CUDA toolkit versions.  We run a
-        quick smoke-test to catch that and fall back to CPU.
-
-        Fix: Install PyTorch nightly with CUDA 12.8+:
-            pip install --pre torch torchvision torchaudio --index-url https://download.pytorch.org/whl/nightly/cu128
-        """
-        if not torch.cuda.is_available():
-            print('DQN using device: cpu')
-            print('  Tip: Install CUDA-enabled PyTorch for GPU acceleration:')
-            print('  pip install torch torchvision '
-                  '--index-url https://download.pytorch.org/whl/cu128')
-            return torch.device('cpu')
-        try:
-            a = torch.randn(4, 4, device='cuda')
-            _ = a @ a.T
-            del a
-            torch.cuda.empty_cache()
-            gpu = torch.cuda.get_device_name(0)
-            vram = torch.cuda.get_device_properties(0).total_mem
-            vram_gb = round(vram / 1024**3, 1)
-            print(f'DQN using device: cuda ({gpu}, {vram_gb}GB VRAM)')
-            return torch.device('cuda')
-        except RuntimeError:
-            print('DQN using device: cpu (CUDA kernels not supported on this GPU)')
-            print('  Tip: Install CUDA-enabled PyTorch for GPU acceleration:')
-            print('  pip install torch torchvision '
-                  '--index-url https://download.pytorch.org/whl/cu128')
-            return torch.device('cpu')
 
     def _preprocess_observation(self, obs: np.ndarray) -> np.ndarray:
         """

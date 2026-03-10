@@ -144,6 +144,8 @@ class MarioLauncher:
         self.num_envs_var = tk.StringVar(value="1")
         self.model_path_var = tk.StringVar(value="")
 
+        self.device_var = tk.StringVar(value="auto")
+
         # Streaming
         self.twitch_key_var = tk.StringVar()
         self.youtube_key_var = tk.StringVar()
@@ -217,6 +219,32 @@ class MarioLauncher:
             bg=BG_MEDIUM,
         )
         subtitle.pack()
+
+        # GPU status indicator
+        device_text, device_color = self._detect_device_label()
+        self.device_label = tk.Label(
+            header,
+            text=device_text,
+            font=("Segoe UI", 9),
+            fg=device_color,
+            bg=BG_MEDIUM,
+        )
+        self.device_label.pack(pady=(4, 0))
+
+    def _detect_device_label(self):
+        """Detect available compute device and return (label_text, color)."""
+        try:
+            from src.algorithms.device import get_device_info
+            info = get_device_info()
+            if info['cuda_available']:
+                gpu = info.get('gpu_name', 'GPU')
+                vram = info.get('vram_gb', '?')
+                return f"GPU: {gpu} ({vram}GB VRAM)", ACCENT_GREEN
+            if info['mps_available']:
+                return "GPU: Apple Silicon (MPS)", ACCENT_GREEN
+            return "Device: CPU (no GPU detected)", "#ffaa00"
+        except Exception:
+            return "Device: CPU", TEXT_DIM
 
     def _build_game_selector(self):
         """Dropdown for choosing which game to play."""
@@ -639,6 +667,35 @@ class MarioLauncher:
         tk.Label(
             envs_frame,
             text="(multi-Mario grid display)",
+            font=("Segoe UI", 9),
+            fg=TEXT_DIM,
+            bg=BG_DARK,
+        ).pack(side="left", padx=(8, 0))
+
+        # Device selector
+        device_frame = tk.Frame(section, bg=BG_DARK)
+        device_frame.pack(anchor="w", pady=(6, 0))
+
+        tk.Label(
+            device_frame,
+            text="Device:",
+            font=("Segoe UI", 10),
+            fg=TEXT_PRIMARY,
+            bg=BG_DARK,
+        ).pack(side="left")
+
+        device_combo = ttk.Combobox(
+            device_frame,
+            textvariable=self.device_var,
+            values=["auto", "cuda", "mps", "cpu"],
+            state="readonly",
+            width=6,
+        )
+        device_combo.pack(side="left", padx=(6, 0))
+
+        tk.Label(
+            device_frame,
+            text="(auto = CUDA > MPS > CPU)",
             font=("Segoe UI", 9),
             fg=TEXT_DIM,
             bg=BG_DARK,
@@ -1153,6 +1210,11 @@ class MarioLauncher:
                 print(f'[Music] Directory not found: {music_dir!r}, skipping music')
             else:
                 cmd.extend(["--music", music_dir])
+
+        # Add device preference
+        device = self.device_var.get()
+        if device and device != 'auto':
+            cmd.extend(["--device", device])
 
         # Add game-specific options from the dynamic config panel
         game_opts = self._get_game_options()

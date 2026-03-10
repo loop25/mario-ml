@@ -37,6 +37,7 @@ from stable_baselines3.common.callbacks import BaseCallback
 from stable_baselines3.common.vec_env import DummyVecEnv, VecFrameStack, VecTransposeImage
 
 from src.algorithms.base_trainer import BaseTrainer
+from src.algorithms.device import select_device
 from src.visualization.dashboard import Dashboard
 from src.environment.mario_env import create_mario_env, create_sb3_env
 
@@ -373,6 +374,7 @@ class PPOTrainer(BaseTrainer):
         num_envs: int = 1,
         world: int = 1,
         stage: int = 1,
+        device_preference: Optional[str] = None,
     ):
         super().__init__(env, config, visualizer, save_dir, log_dir)
 
@@ -384,9 +386,11 @@ class PPOTrainer(BaseTrainer):
         # PPO needs: vectorized env, transposed images (channels first)
         self.vec_env = self._wrap_env_for_sb3(env, num_envs=num_envs)
 
-        # Determine safe device (CUDA may report available but fail
-        # on newer GPUs like RTX 5070 Blackwell/sm_120 with cu124)
-        device = self._select_device()
+        # Centralized device selection with auto-detection
+        # SB3 accepts both torch.device and string
+        device = select_device(
+            preference=device_preference, algo_name='PPO'
+        )
 
         # Create PPO model with CNN policy
         self.model = PPO(
@@ -406,37 +410,6 @@ class PPOTrainer(BaseTrainer):
             tensorboard_log=None,  # Disabled: use our dashboard instead
             device=device,
         )
-
-    @staticmethod
-    def _select_device() -> str:
-        """Return ``'cuda'`` if CUDA works, otherwise ``'cpu'``.
-
-        Runs a quick smoke test to verify GPU kernels actually work.
-        Some GPUs report CUDA available but fail on execution with
-        older CUDA toolkit versions.
-
-        Fix: Install PyTorch with CUDA 12.8+:
-            pip install torch torchvision --index-url https://download.pytorch.org/whl/cu128
-        """
-        try:
-            import torch
-            if torch.cuda.is_available():
-                a = torch.randn(4, 4, device='cuda')
-                _ = a @ a.T
-                del a
-                torch.cuda.empty_cache()
-                gpu = torch.cuda.get_device_name(0)
-                vram = torch.cuda.get_device_properties(0).total_mem
-                vram_gb = round(vram / 1024**3, 1)
-                print(f'PPO using device: cuda ({gpu}, {vram_gb}GB VRAM)')
-                return 'cuda'
-        except (RuntimeError, Exception):
-            pass
-        print('PPO using device: cpu')
-        print('  Tip: Install CUDA-enabled PyTorch for GPU acceleration:')
-        print('  pip install torch torchvision '
-              '--index-url https://download.pytorch.org/whl/cu128')
-        return 'cpu'
 
     def _wrap_env_for_sb3(self, env, num_envs: int = 1):
         """

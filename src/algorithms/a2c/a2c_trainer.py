@@ -25,6 +25,7 @@ from stable_baselines3.common.callbacks import BaseCallback
 from stable_baselines3.common.vec_env import DummyVecEnv, VecTransposeImage
 
 from src.algorithms.base_trainer import BaseTrainer
+from src.algorithms.device import select_device
 from src.visualization.dashboard import Dashboard
 
 
@@ -165,11 +166,13 @@ class A2CTrainer(BaseTrainer):
         save_dir: str = 'models',
         log_dir: str = 'logs',
         num_envs: int = 1,
+        device_preference: Optional[str] = None,
     ):
         super().__init__(env, config, visualizer, save_dir, log_dir)
         self.model = None
         self._env_factory = None
         self.num_envs = num_envs
+        self.device_preference = device_preference
         self.vec_env = None  # Stored so callback can access envs for frame capture
 
     def _wrap_env_for_sb3(self, env, num_envs: int = 1):
@@ -205,6 +208,11 @@ class A2CTrainer(BaseTrainer):
         # Store vec_env so callback can access envs for frame capture
         self.vec_env = vec_env
 
+        # Centralized device selection with auto-detection
+        device = select_device(
+            preference=self.device_preference, algo_name='A2C'
+        )
+
         # Create or reuse A2C model (reuse when resuming from checkpoint)
         if self.model is None:
             self.model = A2C(
@@ -218,6 +226,7 @@ class A2CTrainer(BaseTrainer):
                 vf_coef=self.config.get('vf_coef', 0.5),
                 max_grad_norm=self.config.get('max_grad_norm', 0.5),
                 verbose=0,
+                device=device,
             )
         else:
             self.model.set_env(vec_env)
