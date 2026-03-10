@@ -35,6 +35,7 @@ PROJECT_ROOT = os.path.dirname(os.path.abspath(__file__))
 MAIN_SCRIPT = os.path.join(PROJECT_ROOT, "main.py")
 MODELS_DIR = os.path.join(PROJECT_ROOT, "models")
 RECORDINGS_DIR = os.path.join(PROJECT_ROOT, "recordings")
+ROMS_DIR = os.path.join(PROJECT_ROOT, "roms")
 
 
 def _find_venv_python() -> str:
@@ -173,6 +174,7 @@ class MarioLauncher:
         self._build_start_button()
         self._build_status_bar()
         self._build_folder_buttons()
+        self._build_rom_import()
 
         # Add some bottom padding
         spacer = tk.Frame(self.root, bg=BG_DARK, height=10)
@@ -826,6 +828,107 @@ class MarioLauncher:
             command=lambda: self._open_folder(RECORDINGS_DIR),
         )
         rec_btn.pack(side="left", expand=True, fill="x", padx=(3, 0))
+
+    def _build_rom_import(self):
+        """ROM import wizard for stable-retro games (Sonic, Pokemon, etc.)."""
+        section = tk.LabelFrame(
+            self.root,
+            text="  ROM Import (stable-retro)  ",
+            font=("Segoe UI", 10),
+            fg=TEXT_DIM,
+            bg=BG_DARK,
+            bd=1,
+            relief="groove",
+            highlightbackground=BORDER_COLOR,
+            padx=15,
+            pady=8,
+        )
+        section.pack(fill="x", padx=25, pady=8)
+
+        hint = tk.Label(
+            section,
+            text="Import legally obtained ROMs for retro games",
+            font=("Segoe UI", 9),
+            fg=TEXT_DIM,
+            bg=BG_DARK,
+        )
+        hint.pack(anchor="w")
+
+        btn_row = tk.Frame(section, bg=BG_DARK)
+        btn_row.pack(fill="x", pady=(5, 0))
+
+        import_btn = tk.Button(
+            btn_row,
+            text="Import ROM Directory...",
+            font=("Segoe UI", 10),
+            bg=BG_MEDIUM,
+            fg=TEXT_PRIMARY,
+            activebackground=BG_LIGHT,
+            activeforeground=TEXT_PRIMARY,
+            relief="flat",
+            cursor="hand2",
+            padx=12,
+            command=self._import_rom,
+        )
+        import_btn.pack(side="left")
+
+        self.rom_status = tk.Label(
+            section,
+            text="",
+            font=("Segoe UI", 9),
+            fg=TEXT_DIM,
+            bg=BG_DARK,
+            wraplength=400,
+            justify="left",
+        )
+        self.rom_status.pack(anchor="w", pady=(4, 0))
+
+    def _import_rom(self):
+        """Open a directory picker and run retro.import to register ROMs."""
+        rom_dir = filedialog.askdirectory(
+            title="Select Directory Containing ROM Files",
+            initialdir=os.path.expanduser("~"),
+        )
+        if not rom_dir:
+            return
+
+        self.rom_status.configure(
+            text="Importing ROMs...", fg=ACCENT_BLUE,
+        )
+        self.root.update_idletasks()
+
+        try:
+            result = subprocess.run(
+                [VENV_PYTHON, "-m", "retro.import", rom_dir],
+                capture_output=True, text=True, timeout=30,
+                cwd=PROJECT_ROOT,
+            )
+            if result.returncode == 0:
+                output = result.stdout.strip() or "Import complete."
+                self.rom_status.configure(text=output, fg=ACCENT_GREEN)
+                # Refresh game registry to pick up newly available games
+                self.game_registry.discover()
+                self.available_games = self.game_registry.list_games()
+                game_names = [
+                    f"{g.name} ({g.game_id})" for g in self.available_games
+                ]
+                self.game_combo.configure(values=game_names)
+            else:
+                err = result.stderr.strip() or "Import failed."
+                if "No module named" in err:
+                    err = (
+                        "stable-retro not installed. "
+                        "Run: pip install stable-retro"
+                    )
+                self.rom_status.configure(text=err, fg=ACCENT_RED)
+        except subprocess.TimeoutExpired:
+            self.rom_status.configure(
+                text="Import timed out.", fg=ACCENT_RED,
+            )
+        except FileNotFoundError:
+            self.rom_status.configure(
+                text="Python not found. Check venv.", fg=ACCENT_RED,
+            )
 
     # ===================================================================
     # Actions
