@@ -11,6 +11,7 @@ from BaseGameAdapter is auto-discovered and registered.
 """
 import importlib
 import importlib.util
+import inspect
 import os
 import sys
 from typing import Dict, List, Optional
@@ -116,13 +117,16 @@ class GameRegistry:
         sys.modules[module_name] = module
         spec.loader.exec_module(module)
 
-        # Find the adapter class
+        # Find the adapter class — skip base classes and abstract classes
+        # so that intermediate abstractions (e.g. BaseRetroAdapter) imported
+        # into the adapter module's namespace don't get instantiated.
         for attr_name in dir(module):
             obj = getattr(module, attr_name)
             if (
                 isinstance(obj, type)
                 and issubclass(obj, BaseGameAdapter)
                 and obj is not BaseGameAdapter
+                and not inspect.isabstract(obj)
             ):
                 return obj()
         return None

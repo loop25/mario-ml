@@ -1,7 +1,10 @@
 """Snake game adapter for the plugin registry."""
 from typing import List, Tuple
 
-import gym
+try:
+    import gymnasium as gym
+except ImportError:
+    import gym  # Legacy fallback
 
 from games.base_adapter import BaseGameAdapter
 from games.reward_config import (

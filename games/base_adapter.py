@@ -14,7 +14,10 @@ from abc import ABC, abstractmethod
 from typing import List, Optional, Tuple
 
 import numpy as np
-import gym
+try:
+    import gymnasium as gym
+except ImportError:
+    import gym  # Legacy fallback
 
 from games.reward_config import (
     StandardMetrics,

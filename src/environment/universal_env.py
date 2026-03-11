@@ -8,7 +8,10 @@ optional SB3 compatibility wrapping.
 This replaces the game-specific factory functions (create_mario_env,
 create_cnn_env, etc.) with a single function that works for any game.
 """
-import gym
+try:
+    import gymnasium as gym
+except ImportError:
+    import gym  # Legacy fallback
 
 from games.base_adapter import BaseGameAdapter
 from src.rewards.time_reward import TimeRewardWrapper

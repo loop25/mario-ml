@@ -21,7 +21,10 @@ Architecture:
 from abc import abstractmethod
 from typing import List, Optional, Tuple
 
-import gym
+try:
+    import gymnasium as gym
+except ImportError:
+    import gym  # Legacy fallback
 
 from games.base_adapter import BaseGameAdapter
 from games.reward_config import RewardConfig

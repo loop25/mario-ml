@@ -12,7 +12,10 @@ is only required when create_env() is called.
 """
 from typing import Optional, Tuple
 
-import gym
+try:
+    import gymnasium as gym
+except ImportError:
+    import gym  # Legacy fallback
 
 from games.base_adapter import BaseGameAdapter
 from games.reward_config import (

@@ -11,7 +11,10 @@ StandardMetrics, then applies the universal reward formula.
 """
 import time
 
-import gym
+try:
+    import gymnasium as gym
+except ImportError:
+    import gym  # Legacy fallback
 
 from games.reward_config import RewardConfig
 

@@ -14,8 +14,12 @@ import random
 
 import cv2
 import numpy as np
-import gym
-from gym.spaces import Box, Discrete
+try:
+    import gymnasium as gym
+except ImportError:
+    import gym  # Legacy fallback
+
+from gymnasium.spaces import Box, Discrete
 
 
 class SnakeEnv(gym.Env):

@@ -37,7 +37,6 @@ MODELS_DIR = os.path.join(PROJECT_ROOT, "models")
 RECORDINGS_DIR = os.path.join(PROJECT_ROOT, "recordings")
 ROMS_DIR = os.path.join(PROJECT_ROOT, "roms")
 
-
 def _find_venv_python() -> str:
     """Return the path to the venv's Python, falling back to sys.executable.
 
@@ -52,7 +51,6 @@ def _find_venv_python() -> str:
     if os.path.isfile(venv_python):
         return venv_python
     return sys.executable
-
 
 VENV_PYTHON = _find_venv_python()
 
@@ -177,7 +175,6 @@ ALGO_INFO = {
     },
 }
 
-
 class MarioLauncher:
     """
     Main launcher window.
@@ -231,24 +228,10 @@ class MarioLauncher:
         self.available_games = self.game_registry.list_games()
         self.game_var = tk.StringVar(value='mario')
 
-        # Build all GUI sections
+        # Build UI — tabbed layout
         self._build_header()
-        self._build_game_selector()
-        self._build_algorithm_selector()
-        self._build_world_stage()
-        self._build_duration()
-        self._build_options()
-        self._build_streaming_section()
-        self._build_music_section()
-        self._build_model_loader()
-        self._build_start_button()
-        self._build_status_bar()
-        self._build_folder_buttons()
-        self._build_rom_import()
-
-        # Add some bottom padding
-        spacer = tk.Frame(self.root, bg=BG_DARK, height=10)
-        spacer.pack(fill="x")
+        self._build_notebook()
+        self._build_start_area()
 
         # Center the window on screen
         self.root.update_idletasks()
@@ -266,38 +249,42 @@ class MarioLauncher:
     # ===================================================================
 
     def _build_header(self):
-        """Title section at the top of the window."""
-        header = tk.Frame(self.root, bg=BG_MEDIUM, pady=15)
+        """Compact header: title left, GPU status badge right."""
+        header = tk.Frame(self.root, bg=BG_MEDIUM, padx=20, pady=10)
         header.pack(fill="x")
 
-        title = tk.Label(
-            header,
+        # Left: title + subtitle
+        left = tk.Frame(header, bg=BG_MEDIUM)
+        left.pack(side="left", fill="x", expand=True)
+
+        tk.Label(
+            left,
             text="Game AI Training Studio",
-            font=("Segoe UI", 20, "bold"),
+            font=("Segoe UI", 15, "bold"),
             fg=ACCENT_GREEN,
             bg=BG_MEDIUM,
-        )
-        title.pack()
+        ).pack(anchor="w")
 
-        subtitle = tk.Label(
-            header,
+        tk.Label(
+            left,
             text="Train AI agents to play games — no coding required",
-            font=("Segoe UI", 11),
+            font=("Segoe UI", 9),
             fg=TEXT_DIM,
             bg=BG_MEDIUM,
-        )
-        subtitle.pack()
+        ).pack(anchor="w")
 
-        # GPU status indicator
+        # Right: GPU status badge
         device_text, device_color = self._detect_device_label()
         self.device_label = tk.Label(
             header,
             text=device_text,
-            font=("Segoe UI", 9),
+            font=("Segoe UI", 9, "bold"),
             fg=device_color,
             bg=BG_MEDIUM,
+            padx=8,
+            pady=4,
         )
-        self.device_label.pack(pady=(4, 0))
+        self.device_label.pack(side="right", anchor="e")
 
     def _detect_device_label(self):
         """Detect available compute device and return (label_text, color)."""
@@ -314,112 +301,124 @@ class MarioLauncher:
         except Exception:
             return "Device: CPU", TEXT_DIM
 
-    def _build_game_selector(self):
-        """Dropdown for choosing which game to play."""
-        section = tk.Frame(self.root, bg=BG_DARK, pady=10, padx=25)
-        section.pack(fill="x")
-
-        game_header = tk.Frame(section, bg=BG_DARK)
-        game_header.pack(fill="x")
-
-        tk.Label(
-            game_header,
-            text="Game",
+    def _build_notebook(self):
+        """Build the ttk.Notebook with 3 tabs."""
+        style = ttk.Style()
+        style.configure(
+            'Dark.TNotebook',
+            background=BG_DARK,
+            borderwidth=0,
+            tabmargins=[0, 0, 0, 0],
+        )
+        style.configure(
+            'Dark.TNotebook.Tab',
+            background=BG_MEDIUM,
+            foreground=TEXT_DIM,
+            padding=[14, 7],
             font=("Segoe UI", 10),
-            fg=TEXT_DIM,
-            bg=BG_DARK,
-        ).pack(side="left")
+        )
+        style.map(
+            'Dark.TNotebook.Tab',
+            background=[('selected', BG_LIGHT)],
+            foreground=[('selected', TEXT_PRIMARY)],
+        )
+
+        self.notebook = ttk.Notebook(self.root, style='Dark.TNotebook')
+        self.notebook.pack(fill="both", expand=True)
+
+        tab_train = tk.Frame(self.notebook, bg=BG_DARK)
+        tab_settings = tk.Frame(self.notebook, bg=BG_DARK)
+        tab_stream = tk.Frame(self.notebook, bg=BG_DARK)
+
+        self.notebook.add(tab_train,    text='  ▶  Train  ')
+        self.notebook.add(tab_settings, text='  ⚙  Settings  ')
+        self.notebook.add(tab_stream,   text='  📡  More  ')
+
+        self._build_train_tab(tab_train)
+        self._build_settings_tab(tab_settings)
+        self._build_stream_tab(tab_stream)
+
+    def _build_train_tab(self, parent):
+        """Tab 1: Game selector, algorithm picker, duration, quick options."""
+        pad = {'padx': 20}
+
+        # ── Game selector ──────────────────────────────────────────────
+        game_sec = tk.Frame(parent, bg=BG_DARK, pady=12, **pad)
+        game_sec.pack(fill="x")
 
         tk.Label(
-            game_header,
-            text="Choose which game the AI will learn to play",
-            font=("Segoe UI", 8),
-            fg=TEXT_DIM,
-            bg=BG_DARK,
-        ).pack(side="left", padx=(10, 0))
+            game_sec, text="GAME",
+            font=("Segoe UI", 8, "bold"), fg=TEXT_DIM, bg=BG_DARK,
+        ).pack(anchor="w")
 
         game_names = [f"{g.name} ({g.game_id})" for g in self.available_games]
         if not game_names:
             game_names = ["Super Mario Bros (mario)"]
+
         self.game_combo = ttk.Combobox(
-            section, textvariable=self.game_var,
+            game_sec, textvariable=self.game_var,
             values=game_names, state="readonly",
+            font=("Segoe UI", 11),
         )
-        self.game_combo.pack(fill="x", pady=(3, 0))
+        self.game_combo.pack(fill="x", pady=(4, 0))
         self.game_combo.set(game_names[0])
         self.game_combo.bind("<<ComboboxSelected>>", self._on_game_changed)
 
         # Dynamic game-specific options container
-        self.game_opts_frame = tk.Frame(section, bg=BG_DARK)
+        self.game_opts_frame = tk.Frame(game_sec, bg=BG_DARK)
         self.game_opts_frame.pack(fill="x", pady=(5, 0))
-        self.game_opt_widgets = {}  # name -> (var, widget)
+        self.game_opt_widgets = {}
         self._rebuild_game_options()
 
-    def _build_algorithm_selector(self):
-        """Toggle buttons for all algorithms with descriptions and badges."""
-        section = tk.Frame(self.root, bg=BG_DARK, pady=10, padx=25)
-        section.pack(fill="x")
+        # ── Separator ──────────────────────────────────────────────────
+        tk.Frame(parent, bg=BORDER_COLOR, height=1).pack(fill="x", padx=20)
 
-        # Header row: label + help hint
-        header_row = tk.Frame(section, bg=BG_DARK)
-        header_row.pack(fill="x")
+        # ── Algorithm selector ─────────────────────────────────────────
+        algo_sec = tk.Frame(parent, bg=BG_DARK, pady=12, **pad)
+        algo_sec.pack(fill="x")
 
+        hdr = tk.Frame(algo_sec, bg=BG_DARK)
+        hdr.pack(fill="x")
         tk.Label(
-            header_row,
-            text="Algorithm",
-            font=("Segoe UI", 10),
-            fg=TEXT_DIM,
-            bg=BG_DARK,
+            hdr, text="ALGORITHM",
+            font=("Segoe UI", 8, "bold"), fg=TEXT_DIM, bg=BG_DARK,
         ).pack(side="left")
-
         tk.Label(
-            header_row,
-            text="(hover for details)",
-            font=("Segoe UI", 8),
-            fg=TEXT_DIM,
-            bg=BG_DARK,
+            hdr, text="(hover for details)",
+            font=("Segoe UI", 8), fg=TEXT_DIM, bg=BG_DARK,
         ).pack(side="left", padx=(8, 0))
 
-        # Top row: single-game algorithms
-        btn_frame = tk.Frame(section, bg=BG_DARK)
+        # Top row: 5 single-game algorithms
+        btn_frame = tk.Frame(algo_sec, bg=BG_DARK)
         btn_frame.pack(fill="x", pady=(5, 0))
 
-        # Store button references so we can restyle them on selection
         self.algo_buttons = {}
-
         for algo in ["neat", "ppo", "dqn", "a2c", "rainbow"]:
             info = ALGO_INFO[algo]
-            btn_container = tk.Frame(btn_frame, bg=BG_DARK)
-            btn_container.pack(side="left", expand=True, fill="x", padx=2)
+            col = tk.Frame(btn_frame, bg=BG_DARK)
+            col.pack(side="left", expand=True, fill="x", padx=2)
 
             btn = tk.Button(
-                btn_container,
+                col,
                 text=info["label"],
                 font=("Segoe UI", 11, "bold"),
-                cursor="hand2",
-                relief="flat",
-                bd=0,
+                cursor="hand2", relief="flat", bd=0,
                 command=lambda a=algo: self._select_algorithm(a),
             )
             btn.pack(fill="x")
             self.algo_buttons[algo] = btn
 
-            # Badge label (RECOMMENDED, BEST SCORE, etc.)
             if info.get("badge"):
-                badge = tk.Label(
-                    btn_container,
-                    text=info["badge"],
+                tk.Label(
+                    col, text=info["badge"],
                     font=("Segoe UI", 7, "bold"),
-                    fg=info["color"],
-                    bg=BG_DARK,
-                )
-                badge.pack()
+                    fg=info["color"], bg=BG_DARK,
+                ).pack()
 
-            # Bind tooltip hover for the button
             self._bind_tooltip(btn, info["tooltip"])
 
-        # Bottom row: generalist agent (DT) — given special prominence
-        dt_frame = tk.Frame(section, bg=BG_DARK)
+        # Bottom row: DT generalist (special prominence)
+        dt_frame = tk.Frame(algo_sec, bg=BG_DARK)
         dt_frame.pack(fill="x", pady=(6, 0))
 
         dt_info = ALGO_INFO["dt"]
@@ -427,39 +426,361 @@ class MarioLauncher:
             dt_frame,
             text="DT — Decision Transformer (Generalist Agent)",
             font=("Segoe UI", 10, "bold"),
-            cursor="hand2",
-            relief="flat",
-            bd=0,
+            cursor="hand2", relief="flat", bd=0,
             command=lambda: self._select_algorithm("dt"),
         )
         dt_btn.pack(fill="x")
         self.algo_buttons["dt"] = dt_btn
-
-        dt_badge = tk.Label(
+        tk.Label(
             dt_frame,
             text="ULTIMATE AGENT — One AI that plays ALL games",
             font=("Segoe UI", 8, "bold"),
-            fg=dt_info["color"],
-            bg=BG_DARK,
-        )
-        dt_badge.pack()
+            fg=dt_info["color"], bg=BG_DARK,
+        ).pack()
         self._bind_tooltip(dt_btn, dt_info["tooltip"])
 
-        # Description label that updates on selection
         self.algo_desc_label = tk.Label(
-            section,
-            text="",
-            font=("Segoe UI", 9),
-            fg=TEXT_DIM,
-            bg=BG_DARK,
-            wraplength=500,
-            justify="left",
+            algo_sec, text="",
+            font=("Segoe UI", 9), fg=TEXT_DIM, bg=BG_DARK,
+            wraplength=480, justify="left",
         )
         self.algo_desc_label.pack(anchor="w", pady=(4, 0))
         self._update_algo_desc()
-
-        # Apply initial styling
         self._update_algo_buttons()
+
+        # ── Separator ──────────────────────────────────────────────────
+        tk.Frame(parent, bg=BORDER_COLOR, height=1).pack(fill="x", padx=20)
+
+        # ── Duration + quick checkboxes (two-column row) ───────────────
+        bottom = tk.Frame(parent, bg=BG_DARK, pady=12, **pad)
+        bottom.pack(fill="x")
+
+        left_col = tk.Frame(bottom, bg=BG_DARK)
+        left_col.pack(side="left", fill="x", expand=True)
+
+        right_col = tk.Frame(bottom, bg=BG_DARK, padx=20)
+        right_col.pack(side="left", anchor="n")
+
+        # Duration entry
+        self.duration_label = tk.Label(
+            left_col, text="Generations",
+            font=("Segoe UI", 8, "bold"), fg=TEXT_DIM, bg=BG_DARK,
+        )
+        self.duration_label.pack(anchor="w")
+
+        dur_row = tk.Frame(left_col, bg=BG_DARK)
+        dur_row.pack(fill="x", pady=(3, 0))
+
+        self.duration_entry = tk.Entry(
+            dur_row, textvariable=self.duration_var,
+            font=("Segoe UI", 11), bg=BG_LIGHT, fg=TEXT_PRIMARY,
+            insertbackground=TEXT_PRIMARY, relief="flat", width=12,
+        )
+        self.duration_entry.pack(side="left")
+        tk.Label(
+            dur_row, text="(blank = default)",
+            font=("Segoe UI", 8), fg=TEXT_DIM, bg=BG_DARK,
+        ).pack(side="left", padx=(8, 0))
+
+        # Quick option checkboxes
+        tk.Label(
+            right_col, text="OPTIONS",
+            font=("Segoe UI", 8, "bold"), fg=TEXT_DIM, bg=BG_DARK,
+        ).pack(anchor="w")
+
+        _cb = dict(
+            font=("Segoe UI", 10), fg=TEXT_PRIMARY, bg=BG_DARK,
+            selectcolor=BG_MEDIUM, activebackground=BG_DARK,
+            activeforeground=TEXT_PRIMARY, cursor="hand2",
+        )
+        tk.Checkbutton(
+            right_col, text="Show Live Dashboard",
+            variable=self.visualize_var, **_cb,
+        ).pack(anchor="w")
+        tk.Checkbutton(
+            right_col, text="Record Video",
+            variable=self.record_var, **_cb,
+        ).pack(anchor="w")
+
+        self._update_duration_label()
+
+    def _build_settings_tab(self, parent):
+        """Tab 2: World/Stage, training options, compute, model loader."""
+        pad = {'padx': 20}
+
+        # ── World / Stage ──────────────────────────────────────────────
+        ws_sec = tk.Frame(parent, bg=BG_DARK, pady=12, **pad)
+        ws_sec.pack(fill="x")
+
+        tk.Label(
+            ws_sec, text="WORLD & STAGE  (Mario / multi-level games)",
+            font=("Segoe UI", 8, "bold"), fg=TEXT_DIM, bg=BG_DARK,
+        ).pack(anchor="w")
+
+        ws_row = tk.Frame(ws_sec, bg=BG_DARK)
+        ws_row.pack(fill="x", pady=(4, 0))
+
+        world_col = tk.Frame(ws_row, bg=BG_DARK)
+        world_col.pack(side="left", padx=(0, 20))
+        tk.Label(world_col, text="World", font=("Segoe UI", 9),
+                 fg=TEXT_DIM, bg=BG_DARK).pack(anchor="w")
+        ttk.Combobox(
+            world_col, textvariable=self.world_var,
+            values=[str(i) for i in range(1, 9)],
+            state="readonly", width=6,
+        ).pack(anchor="w", pady=(2, 0))
+
+        stage_col = tk.Frame(ws_row, bg=BG_DARK)
+        stage_col.pack(side="left")
+        tk.Label(stage_col, text="Stage", font=("Segoe UI", 9),
+                 fg=TEXT_DIM, bg=BG_DARK).pack(anchor="w")
+        ttk.Combobox(
+            stage_col, textvariable=self.stage_var,
+            values=[str(i) for i in range(1, 5)],
+            state="readonly", width=6,
+        ).pack(anchor="w", pady=(2, 0))
+
+        tk.Frame(parent, bg=BORDER_COLOR, height=1).pack(fill="x", padx=20)
+
+        # ── Training options ───────────────────────────────────────────
+        opt_sec = tk.Frame(parent, bg=BG_DARK, pady=12, **pad)
+        opt_sec.pack(fill="x")
+
+        tk.Label(
+            opt_sec, text="TRAINING OPTIONS",
+            font=("Segoe UI", 8, "bold"), fg=TEXT_DIM, bg=BG_DARK,
+        ).pack(anchor="w")
+
+        _cb = dict(
+            font=("Segoe UI", 10), fg=TEXT_PRIMARY, bg=BG_DARK,
+            selectcolor=BG_MEDIUM, activebackground=BG_DARK,
+            activeforeground=TEXT_PRIMARY, cursor="hand2",
+        )
+        tk.Checkbutton(
+            opt_sec, text="Evaluation Mode  (watch AI play, no training)",
+            variable=self.eval_var, command=self._on_eval_toggle, **_cb,
+        ).pack(anchor="w", pady=(4, 0))
+        tk.Checkbutton(
+            opt_sec, text="Auto-Advance Stages  (transfer weights to next stage)",
+            variable=self.next_stage_var, **_cb,
+        ).pack(anchor="w")
+        tk.Checkbutton(
+            opt_sec, text="Whole Game  (curriculum learning across all 32 stages)",
+            variable=self.curriculum_var, **_cb,
+        ).pack(anchor="w")
+
+        tk.Frame(parent, bg=BORDER_COLOR, height=1).pack(fill="x", padx=20)
+
+        # ── Compute ────────────────────────────────────────────────────
+        compute_sec = tk.Frame(parent, bg=BG_DARK, pady=12, **pad)
+        compute_sec.pack(fill="x")
+
+        tk.Label(
+            compute_sec, text="COMPUTE",
+            font=("Segoe UI", 8, "bold"), fg=TEXT_DIM, bg=BG_DARK,
+        ).pack(anchor="w")
+
+        compute_row = tk.Frame(compute_sec, bg=BG_DARK)
+        compute_row.pack(fill="x", pady=(4, 0))
+
+        env_col = tk.Frame(compute_row, bg=BG_DARK)
+        env_col.pack(side="left", padx=(0, 30))
+        tk.Label(env_col, text="Parallel Envs", font=("Segoe UI", 9),
+                 fg=TEXT_DIM, bg=BG_DARK).pack(anchor="w")
+        ttk.Combobox(
+            env_col, textvariable=self.num_envs_var,
+            values=["1", "2", "4", "8", "16"],
+            state="readonly", width=6,
+        ).pack(anchor="w", pady=(2, 0))
+
+        dev_col = tk.Frame(compute_row, bg=BG_DARK)
+        dev_col.pack(side="left")
+        tk.Label(dev_col, text="Device  (auto = CUDA→MPS→CPU)", font=("Segoe UI", 9),
+                 fg=TEXT_DIM, bg=BG_DARK).pack(anchor="w")
+        ttk.Combobox(
+            dev_col, textvariable=self.device_var,
+            values=["auto", "cuda", "mps", "cpu"],
+            state="readonly", width=8,
+        ).pack(anchor="w", pady=(2, 0))
+
+        tk.Frame(parent, bg=BORDER_COLOR, height=1).pack(fill="x", padx=20)
+
+        # ── Model loader ───────────────────────────────────────────────
+        model_sec = tk.Frame(parent, bg=BG_DARK, pady=12, **pad)
+        model_sec.pack(fill="x")
+
+        tk.Label(
+            model_sec, text="LOAD MODEL",
+            font=("Segoe UI", 8, "bold"), fg=TEXT_DIM, bg=BG_DARK,
+        ).pack(anchor="w")
+
+        model_row = tk.Frame(model_sec, bg=BG_DARK)
+        model_row.pack(fill="x", pady=(4, 0))
+
+        self.model_display = tk.Label(
+            model_row, text="None",
+            font=("Segoe UI", 10), fg=TEXT_DIM,
+            bg=BG_LIGHT, anchor="w", padx=8, pady=4, relief="flat",
+        )
+        self.model_display.pack(side="left", fill="x", expand=True)
+
+        tk.Button(
+            model_row, text="Browse",
+            font=("Segoe UI", 9), bg=BG_MEDIUM, fg=TEXT_PRIMARY,
+            activebackground=BG_LIGHT, activeforeground=TEXT_PRIMARY,
+            relief="flat", cursor="hand2", padx=12,
+            command=self._browse_model,
+        ).pack(side="left", padx=(5, 0))
+
+        tk.Button(
+            model_row, text="Clear",
+            font=("Segoe UI", 9), bg=BG_MEDIUM, fg=TEXT_DIM,
+            activebackground=BG_LIGHT, activeforeground=TEXT_PRIMARY,
+            relief="flat", cursor="hand2", padx=8,
+            command=self._clear_model,
+        ).pack(side="left", padx=(3, 0))
+
+    def _build_stream_tab(self, parent):
+        """Tab 3: Streaming keys, music, ROM import, folder shortcuts."""
+        pad = {'padx': 20}
+
+        # ── Live streaming ─────────────────────────────────────────────
+        stream_sec = tk.Frame(parent, bg=BG_DARK, pady=12, **pad)
+        stream_sec.pack(fill="x")
+
+        tk.Label(
+            stream_sec, text="LIVE STREAMING",
+            font=("Segoe UI", 8, "bold"), fg=TEXT_DIM, bg=BG_DARK,
+        ).pack(anchor="w")
+
+        tk.Checkbutton(
+            stream_sec, text="Enable Live Streaming  (Twitch / YouTube)",
+            variable=self.stream_var,
+            font=("Segoe UI", 10), fg=ACCENT_RED, bg=BG_DARK,
+            selectcolor=BG_MEDIUM, activebackground=BG_DARK,
+            activeforeground=ACCENT_RED, cursor="hand2",
+        ).pack(anchor="w", pady=(4, 0))
+
+        tk.Label(stream_sec, text="Twitch Stream Key:", font=("Segoe UI", 9),
+                 fg=TEXT_DIM, bg=BG_DARK).pack(anchor="w", pady=(6, 0))
+        tk.Entry(
+            stream_sec, textvariable=self.twitch_key_var, show="*",
+            font=("Segoe UI", 10), bg=BG_MEDIUM, fg=TEXT_PRIMARY,
+            insertbackground=TEXT_PRIMARY, relief="flat",
+        ).pack(fill="x", pady=2)
+
+        tk.Label(stream_sec, text="YouTube Stream Key:", font=("Segoe UI", 9),
+                 fg=TEXT_DIM, bg=BG_DARK).pack(anchor="w", pady=(5, 0))
+        tk.Entry(
+            stream_sec, textvariable=self.youtube_key_var, show="*",
+            font=("Segoe UI", 10), bg=BG_MEDIUM, fg=TEXT_PRIMARY,
+            insertbackground=TEXT_PRIMARY, relief="flat",
+        ).pack(fill="x", pady=2)
+
+        tk.Frame(parent, bg=BORDER_COLOR, height=1).pack(fill="x", padx=20)
+
+        # ── Music ──────────────────────────────────────────────────────
+        music_sec = tk.Frame(parent, bg=BG_DARK, pady=12, **pad)
+        music_sec.pack(fill="x")
+
+        tk.Label(
+            music_sec, text="MUSIC",
+            font=("Segoe UI", 8, "bold"), fg=TEXT_DIM, bg=BG_DARK,
+        ).pack(anchor="w")
+        tk.Checkbutton(
+            music_sec, text="Play Background Music during training",
+            variable=self.music_var,
+            font=("Segoe UI", 10), fg=TEXT_PRIMARY, bg=BG_DARK,
+            selectcolor=BG_MEDIUM, activebackground=BG_DARK,
+            activeforeground=TEXT_PRIMARY, cursor="hand2",
+        ).pack(anchor="w", pady=(4, 0))
+
+        tk.Frame(parent, bg=BORDER_COLOR, height=1).pack(fill="x", padx=20)
+
+        # ── ROM import ─────────────────────────────────────────────────
+        rom_sec = tk.Frame(parent, bg=BG_DARK, pady=12, **pad)
+        rom_sec.pack(fill="x")
+
+        tk.Label(
+            rom_sec, text="ROM IMPORT  (stable-retro)",
+            font=("Segoe UI", 8, "bold"), fg=TEXT_DIM, bg=BG_DARK,
+        ).pack(anchor="w")
+        tk.Label(
+            rom_sec, text="Import legally obtained ROMs for retro games",
+            font=("Segoe UI", 9), fg=TEXT_DIM, bg=BG_DARK,
+        ).pack(anchor="w", pady=(2, 4))
+        tk.Button(
+            rom_sec, text="Import ROM Directory...",
+            font=("Segoe UI", 10), bg=BG_MEDIUM, fg=TEXT_PRIMARY,
+            activebackground=BG_LIGHT, activeforeground=TEXT_PRIMARY,
+            relief="flat", cursor="hand2", padx=12,
+            command=self._import_rom,
+        ).pack(anchor="w")
+        self.rom_status = tk.Label(
+            rom_sec, text="",
+            font=("Segoe UI", 9), fg=TEXT_DIM, bg=BG_DARK,
+            wraplength=400, justify="left",
+        )
+        self.rom_status.pack(anchor="w", pady=(4, 0))
+
+        tk.Frame(parent, bg=BORDER_COLOR, height=1).pack(fill="x", padx=20)
+
+        # ── Quick-access folder buttons ────────────────────────────────
+        folder_sec = tk.Frame(parent, bg=BG_DARK, pady=12, **pad)
+        folder_sec.pack(fill="x")
+
+        tk.Label(
+            folder_sec, text="QUICK ACCESS",
+            font=("Segoe UI", 8, "bold"), fg=TEXT_DIM, bg=BG_DARK,
+        ).pack(anchor="w")
+
+        btn_row = tk.Frame(folder_sec, bg=BG_DARK)
+        btn_row.pack(fill="x", pady=(4, 0))
+
+        for label, cmd in [
+            ("Open Models Folder",      lambda: self._open_folder(MODELS_DIR)),
+            ("Open Recordings Folder",  lambda: self._open_folder(RECORDINGS_DIR)),
+            ("Compare Runs",            self._open_comparison),
+        ]:
+            tk.Button(
+                btn_row, text=label,
+                font=("Segoe UI", 9), bg=BG_MEDIUM, fg=TEXT_DIM,
+                activebackground=BG_LIGHT, activeforeground=TEXT_PRIMARY,
+                relief="flat", cursor="hand2", padx=10,
+                command=cmd,
+            ).pack(side="left", expand=True, fill="x", padx=2)
+
+    def _build_start_area(self):
+        """Always-visible START/STOP button and status bar at the bottom."""
+        tk.Frame(self.root, bg=BORDER_COLOR, height=1).pack(fill="x")
+
+        area = tk.Frame(self.root, bg=BG_DARK, padx=20, pady=10)
+        area.pack(fill="x")
+
+        self.start_btn = tk.Button(
+            area,
+            text="\u25B6   START TRAINING",
+            font=("Segoe UI", 14, "bold"),
+            bg=ACCENT_GREEN,
+            fg=BG_DARK,
+            activebackground="#00b863",
+            activeforeground=BG_DARK,
+            relief="flat",
+            cursor="hand2",
+            pady=10,
+            command=self._on_start_stop,
+        )
+        self.start_btn.pack(fill="x")
+
+        self.status_label = tk.Label(
+            area,
+            text="Ready — Pick a game and algorithm, then click START to begin training!",
+            font=("Segoe UI", 9),
+            fg=TEXT_DIM,
+            bg=BG_DARK,
+            anchor="w",
+        )
+        self.status_label.pack(fill="x", pady=(4, 0))
 
     def _update_algo_desc(self):
         """Update the algorithm description text below the buttons."""
@@ -648,394 +969,14 @@ class MarioLauncher:
                     state="normal",
                 )
 
-    def _build_world_stage(self):
-        """World and Stage dropdown selectors."""
-        section = tk.Frame(self.root, bg=BG_DARK, padx=25, pady=5)
-        section.pack(fill="x")
-
-        # World
-        world_frame = tk.Frame(section, bg=BG_DARK)
-        world_frame.pack(side="left", expand=True, fill="x", padx=(0, 10))
-
-        tk.Label(
-            world_frame,
-            text="World",
-            font=("Segoe UI", 10),
-            fg=TEXT_DIM,
-            bg=BG_DARK,
-        ).pack(anchor="w")
-
-        world_combo = ttk.Combobox(
-            world_frame,
-            textvariable=self.world_var,
-            values=[str(i) for i in range(1, 9)],
-            state="readonly",
-            width=8,
-        )
-        world_combo.pack(anchor="w", pady=(3, 0))
-
-        # Stage
-        stage_frame = tk.Frame(section, bg=BG_DARK)
-        stage_frame.pack(side="left", expand=True, fill="x")
-
-        tk.Label(
-            stage_frame,
-            text="Stage",
-            font=("Segoe UI", 10),
-            fg=TEXT_DIM,
-            bg=BG_DARK,
-        ).pack(anchor="w")
-
-        stage_combo = ttk.Combobox(
-            stage_frame,
-            textvariable=self.stage_var,
-            values=[str(i) for i in range(1, 5)],
-            state="readonly",
-            width=8,
-        )
-        stage_combo.pack(anchor="w", pady=(3, 0))
-
-    def _build_duration(self):
-        """Episodes / Generations / Timesteps input field."""
-        section = tk.Frame(self.root, bg=BG_DARK, padx=25, pady=5)
-        section.pack(fill="x")
-
-        # Label that changes based on selected algorithm
-        self.duration_label = tk.Label(
-            section,
-            text="Generations",
-            font=("Segoe UI", 10),
-            fg=TEXT_DIM,
-            bg=BG_DARK,
-        )
-        self.duration_label.pack(anchor="w")
-
-        entry_frame = tk.Frame(section, bg=BG_DARK)
-        entry_frame.pack(fill="x", pady=(3, 0))
-
-        self.duration_entry = tk.Entry(
-            entry_frame,
-            textvariable=self.duration_var,
-            font=("Segoe UI", 11),
-            bg=BG_LIGHT,
-            fg=TEXT_PRIMARY,
-            insertbackground=TEXT_PRIMARY,
-            relief="flat",
-            width=15,
-        )
-        self.duration_entry.pack(side="left")
-
-        # Placeholder hint
-        self.duration_hint = tk.Label(
-            entry_frame,
-            text="(blank = use config default)",
-            font=("Segoe UI", 9),
-            fg=TEXT_DIM,
-            bg=BG_DARK,
-        )
-        self.duration_hint.pack(side="left", padx=(10, 0))
-
     def _update_duration_label(self):
         """Update the duration label text when algorithm changes."""
         algo = self.selected_algo.get()
         self.duration_label.configure(text=ALGO_INFO[algo]["duration_label"])
 
-    def _build_options(self):
-        """Checkboxes for visualization, recording, eval mode."""
-        section = tk.LabelFrame(
-            self.root,
-            text=" Options ",
-            font=("Segoe UI", 10),
-            fg=TEXT_DIM,
-            bg=BG_DARK,
-            bd=1,
-            relief="groove",
-            highlightbackground=BORDER_COLOR,
-            padx=15,
-            pady=8,
-        )
-        section.pack(fill="x", padx=25, pady=8)
-
-        # Visualize checkbox
-        viz_cb = tk.Checkbutton(
-            section,
-            text="Show Live Dashboard  (watch the AI learn in real-time)",
-            variable=self.visualize_var,
-            font=("Segoe UI", 10),
-            fg=TEXT_PRIMARY,
-            bg=BG_DARK,
-            selectcolor=BG_MEDIUM,
-            activebackground=BG_DARK,
-            activeforeground=TEXT_PRIMARY,
-            cursor="hand2",
-        )
-        viz_cb.pack(anchor="w")
-
-        # Record checkbox
-        rec_cb = tk.Checkbutton(
-            section,
-            text="Record Video  (saves MP4 of the training session)",
-            variable=self.record_var,
-            font=("Segoe UI", 10),
-            fg=TEXT_PRIMARY,
-            bg=BG_DARK,
-            selectcolor=BG_MEDIUM,
-            activebackground=BG_DARK,
-            activeforeground=TEXT_PRIMARY,
-            cursor="hand2",
-        )
-        rec_cb.pack(anchor="w")
-
-        # Eval mode checkbox
-        eval_cb = tk.Checkbutton(
-            section,
-            text="Evaluation Mode  (watch AI play, no training)",
-            variable=self.eval_var,
-            font=("Segoe UI", 10),
-            fg=TEXT_PRIMARY,
-            bg=BG_DARK,
-            selectcolor=BG_MEDIUM,
-            activebackground=BG_DARK,
-            activeforeground=TEXT_PRIMARY,
-            command=self._on_eval_toggle,
-            cursor="hand2",
-        )
-        eval_cb.pack(anchor="w")
-
-        # Stage progression checkbox
-        stage_cb = tk.Checkbutton(
-            section,
-            text="Auto-Advance Stages  (transfer weights to next stage)",
-            variable=self.next_stage_var,
-            font=("Segoe UI", 10),
-            fg=TEXT_PRIMARY,
-            bg=BG_DARK,
-            selectcolor=BG_MEDIUM,
-            activebackground=BG_DARK,
-            activeforeground=TEXT_PRIMARY,
-            cursor="hand2",
-        )
-        stage_cb.pack(anchor="w")
-
-        # Curriculum (whole game) checkbox
-        curriculum_cb = tk.Checkbutton(
-            section,
-            text="Whole Game  (curriculum learning across all 32 stages)",
-            variable=self.curriculum_var,
-            font=("Segoe UI", 10),
-            fg=TEXT_PRIMARY,
-            bg=BG_DARK,
-            selectcolor=BG_MEDIUM,
-            activebackground=BG_DARK,
-            activeforeground=TEXT_PRIMARY,
-            cursor="hand2",
-        )
-        curriculum_cb.pack(anchor="w")
-
-        # Parallel environments selector
-        envs_frame = tk.Frame(section, bg=BG_DARK)
-        envs_frame.pack(anchor="w", pady=(6, 0))
-
-        tk.Label(
-            envs_frame,
-            text="Parallel Envs:",
-            font=("Segoe UI", 10),
-            fg=TEXT_PRIMARY,
-            bg=BG_DARK,
-        ).pack(side="left")
-
-        envs_combo = ttk.Combobox(
-            envs_frame,
-            textvariable=self.num_envs_var,
-            values=["1", "2", "4", "8", "16"],
-            state="readonly",
-            width=4,
-        )
-        envs_combo.pack(side="left", padx=(6, 0))
-
-        tk.Label(
-            envs_frame,
-            text="(multi-Mario grid display)",
-            font=("Segoe UI", 9),
-            fg=TEXT_DIM,
-            bg=BG_DARK,
-        ).pack(side="left", padx=(8, 0))
-
-        # Device selector
-        device_frame = tk.Frame(section, bg=BG_DARK)
-        device_frame.pack(anchor="w", pady=(6, 0))
-
-        tk.Label(
-            device_frame,
-            text="Device:",
-            font=("Segoe UI", 10),
-            fg=TEXT_PRIMARY,
-            bg=BG_DARK,
-        ).pack(side="left")
-
-        device_combo = ttk.Combobox(
-            device_frame,
-            textvariable=self.device_var,
-            values=["auto", "cuda", "mps", "cpu"],
-            state="readonly",
-            width=6,
-        )
-        device_combo.pack(side="left", padx=(6, 0))
-
-        tk.Label(
-            device_frame,
-            text="(auto = CUDA > MPS > CPU)",
-            font=("Segoe UI", 9),
-            fg=TEXT_DIM,
-            bg=BG_DARK,
-        ).pack(side="left", padx=(8, 0))
-
     def _on_eval_toggle(self):
         """Update UI when Evaluation Mode is toggled."""
         self._update_start_button_text()
-
-    def _build_streaming_section(self):
-        """Build the streaming configuration section."""
-        section = tk.LabelFrame(
-            self.root,
-            text="  Streaming  ",
-            font=("Segoe UI", 10),
-            fg=TEXT_DIM,
-            bg=BG_DARK,
-            bd=1,
-            relief="groove",
-            highlightbackground=BORDER_COLOR,
-            padx=15,
-            pady=8,
-        )
-        section.pack(fill="x", padx=25, pady=8)
-
-        # Enable streaming checkbox
-        stream_cb = tk.Checkbutton(
-            section,
-            text="Enable Live Streaming",
-            variable=self.stream_var,
-            font=("Segoe UI", 10),
-            fg=ACCENT_RED,
-            bg=BG_DARK,
-            selectcolor=BG_MEDIUM,
-            activebackground=BG_DARK,
-            activeforeground=ACCENT_RED,
-            cursor="hand2",
-        )
-        stream_cb.pack(anchor="w")
-
-        # Twitch key
-        tk.Label(section, text="Twitch Stream Key:", font=("Segoe UI", 9),
-                 fg=TEXT_DIM, bg=BG_DARK).pack(anchor="w", pady=(5, 0))
-        twitch_entry = tk.Entry(
-            section, textvariable=self.twitch_key_var, show="*",
-            font=("Segoe UI", 10), bg=BG_MEDIUM, fg=TEXT_PRIMARY,
-            insertbackground=TEXT_PRIMARY, relief="flat",
-        )
-        twitch_entry.pack(fill="x", pady=2)
-
-        # YouTube key
-        tk.Label(section, text="YouTube Stream Key:", font=("Segoe UI", 9),
-                 fg=TEXT_DIM, bg=BG_DARK).pack(anchor="w", pady=(5, 0))
-        youtube_entry = tk.Entry(
-            section, textvariable=self.youtube_key_var, show="*",
-            font=("Segoe UI", 10), bg=BG_MEDIUM, fg=TEXT_PRIMARY,
-            insertbackground=TEXT_PRIMARY, relief="flat",
-        )
-        youtube_entry.pack(fill="x", pady=2)
-
-    def _build_music_section(self):
-        """Build the music configuration section."""
-        section = tk.LabelFrame(
-            self.root,
-            text="  Music  ",
-            font=("Segoe UI", 10),
-            fg=TEXT_DIM,
-            bg=BG_DARK,
-            bd=1,
-            relief="groove",
-            highlightbackground=BORDER_COLOR,
-            padx=15,
-            pady=8,
-        )
-        section.pack(fill="x", padx=25, pady=8)
-
-        music_cb = tk.Checkbutton(
-            section,
-            text="Play Background Music",
-            variable=self.music_var,
-            font=("Segoe UI", 10),
-            fg=TEXT_PRIMARY,
-            bg=BG_DARK,
-            selectcolor=BG_MEDIUM,
-            activebackground=BG_DARK,
-            activeforeground=TEXT_PRIMARY,
-            cursor="hand2",
-        )
-        music_cb.pack(anchor="w")
-
-    def _build_model_loader(self):
-        """File browser for loading a saved model."""
-        section = tk.Frame(self.root, bg=BG_DARK, padx=25, pady=5)
-        section.pack(fill="x")
-
-        tk.Label(
-            section,
-            text="Load Model",
-            font=("Segoe UI", 10),
-            fg=TEXT_DIM,
-            bg=BG_DARK,
-        ).pack(anchor="w")
-
-        row = tk.Frame(section, bg=BG_DARK)
-        row.pack(fill="x", pady=(3, 0))
-
-        # Display selected model path
-        self.model_display = tk.Label(
-            row,
-            text="None",
-            font=("Segoe UI", 10),
-            fg=TEXT_DIM,
-            bg=BG_LIGHT,
-            anchor="w",
-            padx=8,
-            pady=4,
-            relief="flat",
-        )
-        self.model_display.pack(side="left", fill="x", expand=True)
-
-        # Browse button
-        browse_btn = tk.Button(
-            row,
-            text="Browse",
-            font=("Segoe UI", 9),
-            bg=BG_MEDIUM,
-            fg=TEXT_PRIMARY,
-            activebackground=BG_LIGHT,
-            activeforeground=TEXT_PRIMARY,
-            relief="flat",
-            cursor="hand2",
-            padx=12,
-            command=self._browse_model,
-        )
-        browse_btn.pack(side="left", padx=(5, 0))
-
-        # Clear button
-        clear_btn = tk.Button(
-            row,
-            text="Clear",
-            font=("Segoe UI", 9),
-            bg=BG_MEDIUM,
-            fg=TEXT_DIM,
-            activebackground=BG_LIGHT,
-            activeforeground=TEXT_PRIMARY,
-            relief="flat",
-            cursor="hand2",
-            padx=8,
-            command=self._clear_model,
-        )
-        clear_btn.pack(side="left", padx=(3, 0))
 
     def _browse_model(self):
         """Open file dialog for selecting a saved model."""
@@ -1071,26 +1012,6 @@ class MarioLauncher:
         else:
             self.model_display.configure(text="None", fg=TEXT_DIM)
 
-    def _build_start_button(self):
-        """Large START / STOP button."""
-        section = tk.Frame(self.root, bg=BG_DARK, padx=25, pady=10)
-        section.pack(fill="x")
-
-        self.start_btn = tk.Button(
-            section,
-            text="\u25B6   START TRAINING",
-            font=("Segoe UI", 14, "bold"),
-            bg=ACCENT_GREEN,
-            fg=BG_DARK,
-            activebackground="#00b863",
-            activeforeground=BG_DARK,
-            relief="flat",
-            cursor="hand2",
-            pady=10,
-            command=self._on_start_stop,
-        )
-        self.start_btn.pack(fill="x")
-
     def _update_start_button_text(self):
         """Update button text based on eval mode and running state."""
         if self.process is not None:
@@ -1117,71 +1038,6 @@ class MarioLauncher:
                     activebackground=color,
                 )
 
-    def _build_status_bar(self):
-        """Status message at the bottom."""
-        section = tk.Frame(self.root, bg=BG_DARK, padx=25, pady=0)
-        section.pack(fill="x")
-
-        self.status_label = tk.Label(
-            section,
-            text="Ready — Pick a game and algorithm, then click START to begin training!",
-            font=("Segoe UI", 9),
-            fg=TEXT_DIM,
-            bg=BG_DARK,
-            anchor="w",
-        )
-        self.status_label.pack(fill="x")
-
-    def _build_folder_buttons(self):
-        """Quick-access buttons to open models and recordings folders."""
-        section = tk.Frame(self.root, bg=BG_DARK, padx=25, pady=8)
-        section.pack(fill="x")
-
-        models_btn = tk.Button(
-            section,
-            text="Open Models Folder",
-            font=("Segoe UI", 9),
-            bg=BG_MEDIUM,
-            fg=TEXT_DIM,
-            activebackground=BG_LIGHT,
-            activeforeground=TEXT_PRIMARY,
-            relief="flat",
-            cursor="hand2",
-            padx=10,
-            command=lambda: self._open_folder(MODELS_DIR),
-        )
-        models_btn.pack(side="left", expand=True, fill="x", padx=(0, 3))
-
-        rec_btn = tk.Button(
-            section,
-            text="Open Recordings Folder",
-            font=("Segoe UI", 9),
-            bg=BG_MEDIUM,
-            fg=TEXT_DIM,
-            activebackground=BG_LIGHT,
-            activeforeground=TEXT_PRIMARY,
-            relief="flat",
-            cursor="hand2",
-            padx=10,
-            command=lambda: self._open_folder(RECORDINGS_DIR),
-        )
-        rec_btn.pack(side="left", expand=True, fill="x", padx=(3, 3))
-
-        compare_btn = tk.Button(
-            section,
-            text="Compare Runs",
-            font=("Segoe UI", 9),
-            bg=BG_MEDIUM,
-            fg=TEXT_DIM,
-            activebackground=BG_LIGHT,
-            activeforeground=TEXT_PRIMARY,
-            relief="flat",
-            cursor="hand2",
-            padx=10,
-            command=self._open_comparison,
-        )
-        compare_btn.pack(side="left", expand=True, fill="x", padx=(3, 0))
-
     def _open_comparison(self):
         """Open the cross-game training comparison panel."""
         try:
@@ -1192,60 +1048,6 @@ class MarioLauncher:
             )
         except ImportError as e:
             self._set_status(f"Comparison panel error: {e}", ACCENT_RED)
-
-    def _build_rom_import(self):
-        """ROM import wizard for stable-retro games (Sonic, Pokemon, etc.)."""
-        section = tk.LabelFrame(
-            self.root,
-            text="  ROM Import (stable-retro)  ",
-            font=("Segoe UI", 10),
-            fg=TEXT_DIM,
-            bg=BG_DARK,
-            bd=1,
-            relief="groove",
-            highlightbackground=BORDER_COLOR,
-            padx=15,
-            pady=8,
-        )
-        section.pack(fill="x", padx=25, pady=8)
-
-        hint = tk.Label(
-            section,
-            text="Import legally obtained ROMs for retro games",
-            font=("Segoe UI", 9),
-            fg=TEXT_DIM,
-            bg=BG_DARK,
-        )
-        hint.pack(anchor="w")
-
-        btn_row = tk.Frame(section, bg=BG_DARK)
-        btn_row.pack(fill="x", pady=(5, 0))
-
-        import_btn = tk.Button(
-            btn_row,
-            text="Import ROM Directory...",
-            font=("Segoe UI", 10),
-            bg=BG_MEDIUM,
-            fg=TEXT_PRIMARY,
-            activebackground=BG_LIGHT,
-            activeforeground=TEXT_PRIMARY,
-            relief="flat",
-            cursor="hand2",
-            padx=12,
-            command=self._import_rom,
-        )
-        import_btn.pack(side="left")
-
-        self.rom_status = tk.Label(
-            section,
-            text="",
-            font=("Segoe UI", 9),
-            fg=TEXT_DIM,
-            bg=BG_DARK,
-            wraplength=400,
-            justify="left",
-        )
-        self.rom_status.pack(anchor="w", pady=(4, 0))
 
     def _import_rom(self):
         """Open a directory picker and run retro.import to register ROMs."""
@@ -1513,7 +1315,6 @@ class MarioLauncher:
         """Start the tkinter main loop."""
         self.root.mainloop()
 
-
 # -----------------------------------------------------------------------
 # Apply a dark theme to ttk widgets (comboboxes, etc.)
 # -----------------------------------------------------------------------
@@ -1549,7 +1350,6 @@ def apply_dark_theme(root):
     # General frame styling
     style.configure("TFrame", background=BG_DARK)
     style.configure("TLabel", background=BG_DARK, foreground=TEXT_PRIMARY)
-
 
 # -----------------------------------------------------------------------
 # Entry point

@@ -104,7 +104,7 @@ def get_device_info() -> dict:
     if torch.cuda.is_available() and _cuda_smoke_test():
         info['cuda_available'] = True
         info['gpu_name'] = torch.cuda.get_device_name(0)
-        vram = torch.cuda.get_device_properties(0).total_mem
+        vram = torch.cuda.get_device_properties(0).total_memory
         info['vram_gb'] = round(vram / 1024**3, 1)
         info['selected'] = 'cuda'
     # Check MPS (Apple Silicon)
