@@ -122,6 +122,12 @@ class BaseTrainer(ABC):
         self._original_sigint = signal.getsignal(signal.SIGINT)
         signal.signal(signal.SIGINT, self._handle_shutdown)
 
+        # On Windows, also handle SIGBREAK so that CTRL_BREAK_EVENT
+        # from the launcher triggers graceful shutdown instead of
+        # crashing Intel MKL/Fortran runtime (forrtl error 200).
+        if sys.platform == 'win32' and hasattr(signal, 'SIGBREAK'):
+            signal.signal(signal.SIGBREAK, self._handle_shutdown)
+
     @property
     def training_paused(self):
         """Whether training is currently paused."""

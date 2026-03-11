@@ -49,7 +49,8 @@ def _cuda_smoke_test() -> bool:
         del a
         torch.cuda.empty_cache()
         return True
-    except (RuntimeError, AssertionError, Exception):
+    except (RuntimeError, AssertionError, Exception) as e:
+        print(f'  [Device] CUDA smoke test failed: {e}')
         return False
 
 
@@ -63,7 +64,8 @@ def _mps_smoke_test() -> bool:
         _ = a @ a.T
         del a
         return True
-    except (RuntimeError, Exception):
+    except (RuntimeError, Exception) as e:
+        print(f'  [Device] MPS smoke test failed: {e}')
         return False
 
 
@@ -101,17 +103,25 @@ def get_device_info() -> dict:
     }
 
     # Check CUDA
-    if torch.cuda.is_available() and _cuda_smoke_test():
-        info['cuda_available'] = True
-        info['gpu_name'] = torch.cuda.get_device_name(0)
-        vram = torch.cuda.get_device_properties(0).total_memory
-        info['vram_gb'] = round(vram / 1024**3, 1)
-        info['selected'] = 'cuda'
+    if torch.cuda.is_available():
+        if _cuda_smoke_test():
+            info['cuda_available'] = True
+            info['gpu_name'] = torch.cuda.get_device_name(0)
+            vram = torch.cuda.get_device_properties(0).total_memory
+            info['vram_gb'] = round(vram / 1024**3, 1)
+            info['selected'] = 'cuda'
+        else:
+            gpu = torch.cuda.get_device_name(0)
+            print(f'  [Device] CUDA available ({gpu}) but smoke test failed '
+                  f'— falling back to CPU')
     # Check MPS (Apple Silicon)
     elif hasattr(torch.backends, 'mps') and torch.backends.mps.is_available():
         if _mps_smoke_test():
             info['mps_available'] = True
             info['selected'] = 'mps'
+        else:
+            print('  [Device] MPS available but smoke test failed '
+                  '— falling back to CPU')
 
     return info
 
@@ -172,7 +182,7 @@ def select_device(
                 )
             gpu = torch.cuda.get_device_name(0)
             vram_gb = round(
-                torch.cuda.get_device_properties(0).total_mem / 1024**3, 1
+                torch.cuda.get_device_properties(0).total_memory / 1024**3, 1
             )
             if verbose:
                 print(f'{prefix} device: cuda ({gpu}, {vram_gb}GB VRAM)')

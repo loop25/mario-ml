@@ -7,12 +7,18 @@ Instead of typing terminal commands with --flags, just click buttons.
 This launcher builds the appropriate command and runs main.py as a
 subprocess, so the training/pygame dashboard runs independently.
 
+Features:
+    - 2-column layout: all settings visible at once (no tabs)
+    - Persistent settings: saves your preferences across sessions
+    - Resizable/maximizable window
+    - Graduated shutdown: CTRL_C_EVENT → terminate → kill
+
 Usage:
     1. Activate the virtual environment:
        C:\\Projects\\mario-ml\\venv\\Scripts\\activate
     2. Run the launcher:
        python launcher.py
-    3. Pick your algorithm, options, and click START.
+    3. Pick your game and algorithm, then click START.
 
 Requirements:
     - Python 3.11 with tkinter (included by default)
@@ -21,8 +27,10 @@ Requirements:
 
 import os
 import sys
+import json
 import signal
 import subprocess
+import time
 import tkinter as tk
 from tkinter import ttk, filedialog
 
@@ -36,6 +44,8 @@ MAIN_SCRIPT = os.path.join(PROJECT_ROOT, "main.py")
 MODELS_DIR = os.path.join(PROJECT_ROOT, "models")
 RECORDINGS_DIR = os.path.join(PROJECT_ROOT, "recordings")
 ROMS_DIR = os.path.join(PROJECT_ROOT, "roms")
+CONFIG_DIR = os.path.join(PROJECT_ROOT, "config")
+SETTINGS_PATH = os.path.join(CONFIG_DIR, "launcher_settings.json")
 
 def _find_venv_python() -> str:
     """Return the path to the venv's Python, falling back to sys.executable.
@@ -85,7 +95,7 @@ ALGO_INFO = {
             "Speed: Fast per generation, needs many generations.\n"
             "Best for: action games (Mario, Sonic) with small observation."
         ),
-        "badge": None,  # No special badge
+        "badge": None,
     },
     "ppo": {
         "color": ACCENT_BLUE,
@@ -175,26 +185,54 @@ ALGO_INFO = {
     },
 }
 
+# Default settings for persistence
+DEFAULT_SETTINGS = {
+    "algorithm": "neat",
+    "game_index": 0,
+    "device": "auto",
+    "duration": "",
+    "visualize": True,
+    "record": False,
+    "eval_mode": False,
+    "next_stage": False,
+    "curriculum": False,
+    "num_envs": "1",
+    "world": "1",
+    "stage": "1",
+    "model_path": "",
+    "stream_enabled": False,
+    "twitch_key": "",
+    "youtube_key": "",
+    "music": True,
+    "window_geometry": "",
+    "extras_expanded": False,
+}
+
+
 class MarioLauncher:
     """
     Main launcher window.
 
-    Creates a tkinter GUI with controls for algorithm selection,
-    world/stage, training options, and a START/STOP button.
+    Creates a tkinter GUI with a 2-column layout for algorithm selection,
+    game options, training settings, and a START/STOP button.
     Spawns main.py as a subprocess when START is clicked.
     """
 
     def __init__(self):
         # ---------------------------------------------------------------
-        # Window setup
+        # Window setup — resizable with minimum size
         # ---------------------------------------------------------------
         self.root = tk.Tk()
         self.root.title("Game AI Training Studio")
         self.root.configure(bg=BG_DARK)
-        self.root.resizable(False, False)
+        self.root.resizable(True, True)
+        self.root.minsize(800, 550)
 
         # Track the training subprocess (None when idle)
         self.process = None
+
+        # Debounce timer for settings save
+        self._save_timer = None
 
         # State variables
         self.selected_algo = tk.StringVar(value="neat")
@@ -222,30 +260,167 @@ class MarioLauncher:
             value=os.path.join(PROJECT_ROOT, 'assets', 'music')
         )
 
+        # Extras panel state
+        self._extras_expanded = False
+
         # Discover games
         self.game_registry = GameRegistry()
         self.game_registry.discover()
         self.available_games = self.game_registry.list_games()
         self.game_var = tk.StringVar(value='mario')
 
-        # Build UI — tabbed layout
+        # Build UI — 2-column grid layout
         self._build_header()
-        self._build_notebook()
+        self._build_main_layout()
         self._build_start_area()
 
-        # Center the window on screen
+        # Load saved settings (overrides defaults above)
+        self._load_settings()
+
+        # Set initial window position/size
         self.root.update_idletasks()
-        w = self.root.winfo_width()
-        h = self.root.winfo_height()
-        x = (self.root.winfo_screenwidth() // 2) - (w // 2)
-        y = (self.root.winfo_screenheight() // 2) - (h // 2)
-        self.root.geometry(f"+{x}+{y}")
+        saved_geo = getattr(self, '_saved_geometry', '')
+        if saved_geo:
+            try:
+                self.root.geometry(saved_geo)
+            except tk.TclError:
+                self._center_window()
+        else:
+            self._center_window()
 
         # Handle window close
         self.root.protocol("WM_DELETE_WINDOW", self._on_close)
 
+        # Wire up auto-save on settings change
+        self._wire_save_triggers()
+
+    def _center_window(self):
+        """Center the window on screen with a default size."""
+        self.root.geometry("960x680")
+        self.root.update_idletasks()
+        w = 960
+        h = 680
+        x = (self.root.winfo_screenwidth() // 2) - (w // 2)
+        y = (self.root.winfo_screenheight() // 2) - (h // 2)
+        self.root.geometry(f"{w}x{h}+{x}+{y}")
+
     # ===================================================================
-    # GUI Building Methods
+    # Settings Persistence
+    # ===================================================================
+
+    def _load_settings(self):
+        """Load saved settings from JSON, merging with defaults."""
+        if not os.path.isfile(SETTINGS_PATH):
+            return
+
+        try:
+            with open(SETTINGS_PATH, 'r') as f:
+                saved = json.load(f)
+        except (json.JSONDecodeError, OSError):
+            return
+
+        settings = {**DEFAULT_SETTINGS, **saved}
+
+        # Apply saved values to tk variables
+        self.selected_algo.set(settings['algorithm'])
+        self.device_var.set(settings['device'])
+        self.duration_var.set(settings['duration'])
+        self.visualize_var.set(settings['visualize'])
+        self.record_var.set(settings['record'])
+        self.eval_var.set(settings['eval_mode'])
+        self.next_stage_var.set(settings['next_stage'])
+        self.curriculum_var.set(settings['curriculum'])
+        self.num_envs_var.set(settings['num_envs'])
+        self.world_var.set(settings['world'])
+        self.stage_var.set(settings['stage'])
+        self.model_path_var.set(settings['model_path'])
+        self.stream_var.set(settings['stream_enabled'])
+        self.twitch_key_var.set(settings['twitch_key'])
+        self.youtube_key_var.set(settings['youtube_key'])
+        self.music_var.set(settings['music'])
+
+        # Restore game selection
+        game_idx = settings.get('game_index', 0)
+        game_names = [f"{g.name} ({g.game_id})" for g in self.available_games]
+        if game_names and 0 <= game_idx < len(game_names):
+            self.game_combo.set(game_names[game_idx])
+
+        # Restore extras panel state
+        if settings.get('extras_expanded', False):
+            self._extras_expanded = True
+            self._toggle_extras(save=False)
+
+        # Restore window geometry
+        self._saved_geometry = settings.get('window_geometry', '')
+
+        # Update UI to reflect loaded settings
+        self._update_algo_buttons()
+        self._update_algo_desc()
+        self._update_duration_label()
+        self._update_model_display()
+        self._update_start_button_text()
+        self._rebuild_game_options()
+
+    def _save_settings(self):
+        """Save current settings to JSON."""
+        # Figure out game index
+        game_text = self.game_combo.get()
+        game_names = [f"{g.name} ({g.game_id})" for g in self.available_games]
+        game_idx = game_names.index(game_text) if game_text in game_names else 0
+
+        settings = {
+            'algorithm': self.selected_algo.get(),
+            'game_index': game_idx,
+            'device': self.device_var.get(),
+            'duration': self.duration_var.get(),
+            'visualize': self.visualize_var.get(),
+            'record': self.record_var.get(),
+            'eval_mode': self.eval_var.get(),
+            'next_stage': self.next_stage_var.get(),
+            'curriculum': self.curriculum_var.get(),
+            'num_envs': self.num_envs_var.get(),
+            'world': self.world_var.get(),
+            'stage': self.stage_var.get(),
+            'model_path': self.model_path_var.get(),
+            'stream_enabled': self.stream_var.get(),
+            'twitch_key': self.twitch_key_var.get(),
+            'youtube_key': self.youtube_key_var.get(),
+            'music': self.music_var.get(),
+            'window_geometry': self.root.geometry(),
+            'extras_expanded': self._extras_expanded,
+        }
+
+        try:
+            os.makedirs(CONFIG_DIR, exist_ok=True)
+            # Atomic write via temp file
+            tmp_path = SETTINGS_PATH + '.tmp'
+            with open(tmp_path, 'w') as f:
+                json.dump(settings, f, indent=2)
+            # Replace atomically (Windows: os.replace is atomic)
+            os.replace(tmp_path, SETTINGS_PATH)
+        except OSError as e:
+            print(f'[Settings] Failed to save: {e}')
+
+    def _schedule_save(self, *args):
+        """Debounced save — waits 300ms after last change before writing."""
+        if self._save_timer is not None:
+            self.root.after_cancel(self._save_timer)
+        self._save_timer = self.root.after(300, self._save_settings)
+
+    def _wire_save_triggers(self):
+        """Register trace callbacks on all tk variables for auto-save."""
+        for var in [
+            self.selected_algo, self.world_var, self.stage_var,
+            self.duration_var, self.visualize_var, self.record_var,
+            self.eval_var, self.next_stage_var, self.curriculum_var,
+            self.num_envs_var, self.model_path_var, self.device_var,
+            self.stream_var, self.twitch_key_var, self.youtube_key_var,
+            self.music_var, self.game_var,
+        ]:
+            var.trace_add('write', self._schedule_save)
+
+    # ===================================================================
+    # GUI Building Methods — 2-column grid layout
     # ===================================================================
 
     def _build_header(self):
@@ -301,53 +476,39 @@ class MarioLauncher:
         except Exception:
             return "Device: CPU", TEXT_DIM
 
-    def _build_notebook(self):
-        """Build the ttk.Notebook with 3 tabs."""
-        style = ttk.Style()
-        style.configure(
-            'Dark.TNotebook',
-            background=BG_DARK,
-            borderwidth=0,
-            tabmargins=[0, 0, 0, 0],
-        )
-        style.configure(
-            'Dark.TNotebook.Tab',
-            background=BG_MEDIUM,
-            foreground=TEXT_DIM,
-            padding=[14, 7],
-            font=("Segoe UI", 10),
-        )
-        style.map(
-            'Dark.TNotebook.Tab',
-            background=[('selected', BG_LIGHT)],
-            foreground=[('selected', TEXT_PRIMARY)],
+    def _build_main_layout(self):
+        """Build the 2-column grid: left (game/algo/duration) + right (options/compute/model)."""
+        # Main content frame that stretches with the window
+        main = tk.Frame(self.root, bg=BG_DARK)
+        main.pack(fill="both", expand=True, padx=0, pady=0)
+        main.columnconfigure(0, weight=1, uniform="col")
+        main.columnconfigure(1, weight=1, uniform="col")
+        main.rowconfigure(0, weight=1)
+
+        # Left column
+        left = tk.Frame(main, bg=BG_DARK, padx=20, pady=10)
+        left.grid(row=0, column=0, sticky="nsew")
+        self._build_left_column(left)
+
+        # Vertical separator
+        tk.Frame(main, bg=BORDER_COLOR, width=1).grid(
+            row=0, column=0, sticky="nse", padx=0,
         )
 
-        self.notebook = ttk.Notebook(self.root, style='Dark.TNotebook')
-        self.notebook.pack(fill="both", expand=True)
+        # Right column
+        right = tk.Frame(main, bg=BG_DARK, padx=20, pady=10)
+        right.grid(row=0, column=1, sticky="nsew")
+        self._build_right_column(right)
 
-        tab_train = tk.Frame(self.notebook, bg=BG_DARK)
-        tab_settings = tk.Frame(self.notebook, bg=BG_DARK)
-        tab_stream = tk.Frame(self.notebook, bg=BG_DARK)
+        # Extras section (collapsible, spans both columns)
+        self._build_extras_section(self.root)
 
-        self.notebook.add(tab_train,    text='  ▶  Train  ')
-        self.notebook.add(tab_settings, text='  ⚙  Settings  ')
-        self.notebook.add(tab_stream,   text='  📡  More  ')
-
-        self._build_train_tab(tab_train)
-        self._build_settings_tab(tab_settings)
-        self._build_stream_tab(tab_stream)
-
-    def _build_train_tab(self, parent):
-        """Tab 1: Game selector, algorithm picker, duration, quick options."""
-        pad = {'padx': 20}
+    def _build_left_column(self, parent):
+        """Left column: GAME selector + ALGORITHM picker + DURATION."""
 
         # ── Game selector ──────────────────────────────────────────────
-        game_sec = tk.Frame(parent, bg=BG_DARK, pady=12, **pad)
-        game_sec.pack(fill="x")
-
         tk.Label(
-            game_sec, text="GAME",
+            parent, text="GAME",
             font=("Segoe UI", 8, "bold"), fg=TEXT_DIM, bg=BG_DARK,
         ).pack(anchor="w")
 
@@ -356,7 +517,7 @@ class MarioLauncher:
             game_names = ["Super Mario Bros (mario)"]
 
         self.game_combo = ttk.Combobox(
-            game_sec, textvariable=self.game_var,
+            parent, textvariable=self.game_var,
             values=game_names, state="readonly",
             font=("Segoe UI", 11),
         )
@@ -364,20 +525,39 @@ class MarioLauncher:
         self.game_combo.set(game_names[0])
         self.game_combo.bind("<<ComboboxSelected>>", self._on_game_changed)
 
-        # Dynamic game-specific options container
-        self.game_opts_frame = tk.Frame(game_sec, bg=BG_DARK)
+        # Dynamic game-specific options
+        self.game_opts_frame = tk.Frame(parent, bg=BG_DARK)
         self.game_opts_frame.pack(fill="x", pady=(5, 0))
         self.game_opt_widgets = {}
         self._rebuild_game_options()
 
+        # World / Stage row (for Mario / multi-level games)
+        ws_frame = tk.Frame(parent, bg=BG_DARK)
+        ws_frame.pack(fill="x", pady=(8, 0))
+
+        tk.Label(ws_frame, text="World", font=("Segoe UI", 9),
+                 fg=TEXT_DIM, bg=BG_DARK).pack(side="left")
+        ttk.Combobox(
+            ws_frame, textvariable=self.world_var,
+            values=[str(i) for i in range(1, 9)],
+            state="readonly", width=4,
+        ).pack(side="left", padx=(4, 12))
+
+        tk.Label(ws_frame, text="Stage", font=("Segoe UI", 9),
+                 fg=TEXT_DIM, bg=BG_DARK).pack(side="left")
+        ttk.Combobox(
+            ws_frame, textvariable=self.stage_var,
+            values=[str(i) for i in range(1, 5)],
+            state="readonly", width=4,
+        ).pack(side="left", padx=(4, 0))
+
         # ── Separator ──────────────────────────────────────────────────
-        tk.Frame(parent, bg=BORDER_COLOR, height=1).pack(fill="x", padx=20)
+        tk.Frame(parent, bg=BORDER_COLOR, height=1).pack(
+            fill="x", pady=(12, 8),
+        )
 
         # ── Algorithm selector ─────────────────────────────────────────
-        algo_sec = tk.Frame(parent, bg=BG_DARK, pady=12, **pad)
-        algo_sec.pack(fill="x")
-
-        hdr = tk.Frame(algo_sec, bg=BG_DARK)
+        hdr = tk.Frame(parent, bg=BG_DARK)
         hdr.pack(fill="x")
         tk.Label(
             hdr, text="ALGORITHM",
@@ -389,7 +569,7 @@ class MarioLauncher:
         ).pack(side="left", padx=(8, 0))
 
         # Top row: 5 single-game algorithms
-        btn_frame = tk.Frame(algo_sec, bg=BG_DARK)
+        btn_frame = tk.Frame(parent, bg=BG_DARK)
         btn_frame.pack(fill="x", pady=(5, 0))
 
         self.algo_buttons = {}
@@ -418,7 +598,7 @@ class MarioLauncher:
             self._bind_tooltip(btn, info["tooltip"])
 
         # Bottom row: DT generalist (special prominence)
-        dt_frame = tk.Frame(algo_sec, bg=BG_DARK)
+        dt_frame = tk.Frame(parent, bg=BG_DARK)
         dt_frame.pack(fill="x", pady=(6, 0))
 
         dt_info = ALGO_INFO["dt"]
@@ -440,35 +620,27 @@ class MarioLauncher:
         self._bind_tooltip(dt_btn, dt_info["tooltip"])
 
         self.algo_desc_label = tk.Label(
-            algo_sec, text="",
+            parent, text="",
             font=("Segoe UI", 9), fg=TEXT_DIM, bg=BG_DARK,
-            wraplength=480, justify="left",
+            wraplength=400, justify="left",
         )
         self.algo_desc_label.pack(anchor="w", pady=(4, 0))
         self._update_algo_desc()
         self._update_algo_buttons()
 
         # ── Separator ──────────────────────────────────────────────────
-        tk.Frame(parent, bg=BORDER_COLOR, height=1).pack(fill="x", padx=20)
+        tk.Frame(parent, bg=BORDER_COLOR, height=1).pack(
+            fill="x", pady=(10, 8),
+        )
 
-        # ── Duration + quick checkboxes (two-column row) ───────────────
-        bottom = tk.Frame(parent, bg=BG_DARK, pady=12, **pad)
-        bottom.pack(fill="x")
-
-        left_col = tk.Frame(bottom, bg=BG_DARK)
-        left_col.pack(side="left", fill="x", expand=True)
-
-        right_col = tk.Frame(bottom, bg=BG_DARK, padx=20)
-        right_col.pack(side="left", anchor="n")
-
-        # Duration entry
+        # ── Duration entry ─────────────────────────────────────────────
         self.duration_label = tk.Label(
-            left_col, text="Generations",
+            parent, text="Generations",
             font=("Segoe UI", 8, "bold"), fg=TEXT_DIM, bg=BG_DARK,
         )
         self.duration_label.pack(anchor="w")
 
-        dur_row = tk.Frame(left_col, bg=BG_DARK)
+        dur_row = tk.Frame(parent, bg=BG_DARK)
         dur_row.pack(fill="x", pady=(3, 0))
 
         self.duration_entry = tk.Entry(
@@ -482,72 +654,14 @@ class MarioLauncher:
             font=("Segoe UI", 8), fg=TEXT_DIM, bg=BG_DARK,
         ).pack(side="left", padx=(8, 0))
 
-        # Quick option checkboxes
-        tk.Label(
-            right_col, text="OPTIONS",
-            font=("Segoe UI", 8, "bold"), fg=TEXT_DIM, bg=BG_DARK,
-        ).pack(anchor="w")
-
-        _cb = dict(
-            font=("Segoe UI", 10), fg=TEXT_PRIMARY, bg=BG_DARK,
-            selectcolor=BG_MEDIUM, activebackground=BG_DARK,
-            activeforeground=TEXT_PRIMARY, cursor="hand2",
-        )
-        tk.Checkbutton(
-            right_col, text="Show Live Dashboard",
-            variable=self.visualize_var, **_cb,
-        ).pack(anchor="w")
-        tk.Checkbutton(
-            right_col, text="Record Video",
-            variable=self.record_var, **_cb,
-        ).pack(anchor="w")
-
         self._update_duration_label()
 
-    def _build_settings_tab(self, parent):
-        """Tab 2: World/Stage, training options, compute, model loader."""
-        pad = {'padx': 20}
-
-        # ── World / Stage ──────────────────────────────────────────────
-        ws_sec = tk.Frame(parent, bg=BG_DARK, pady=12, **pad)
-        ws_sec.pack(fill="x")
-
-        tk.Label(
-            ws_sec, text="WORLD & STAGE  (Mario / multi-level games)",
-            font=("Segoe UI", 8, "bold"), fg=TEXT_DIM, bg=BG_DARK,
-        ).pack(anchor="w")
-
-        ws_row = tk.Frame(ws_sec, bg=BG_DARK)
-        ws_row.pack(fill="x", pady=(4, 0))
-
-        world_col = tk.Frame(ws_row, bg=BG_DARK)
-        world_col.pack(side="left", padx=(0, 20))
-        tk.Label(world_col, text="World", font=("Segoe UI", 9),
-                 fg=TEXT_DIM, bg=BG_DARK).pack(anchor="w")
-        ttk.Combobox(
-            world_col, textvariable=self.world_var,
-            values=[str(i) for i in range(1, 9)],
-            state="readonly", width=6,
-        ).pack(anchor="w", pady=(2, 0))
-
-        stage_col = tk.Frame(ws_row, bg=BG_DARK)
-        stage_col.pack(side="left")
-        tk.Label(stage_col, text="Stage", font=("Segoe UI", 9),
-                 fg=TEXT_DIM, bg=BG_DARK).pack(anchor="w")
-        ttk.Combobox(
-            stage_col, textvariable=self.stage_var,
-            values=[str(i) for i in range(1, 5)],
-            state="readonly", width=6,
-        ).pack(anchor="w", pady=(2, 0))
-
-        tk.Frame(parent, bg=BORDER_COLOR, height=1).pack(fill="x", padx=20)
+    def _build_right_column(self, parent):
+        """Right column: TRAINING OPTIONS + COMPUTE + LOAD MODEL."""
 
         # ── Training options ───────────────────────────────────────────
-        opt_sec = tk.Frame(parent, bg=BG_DARK, pady=12, **pad)
-        opt_sec.pack(fill="x")
-
         tk.Label(
-            opt_sec, text="TRAINING OPTIONS",
+            parent, text="TRAINING OPTIONS",
             font=("Segoe UI", 8, "bold"), fg=TEXT_DIM, bg=BG_DARK,
         ).pack(anchor="w")
 
@@ -557,34 +671,52 @@ class MarioLauncher:
             activeforeground=TEXT_PRIMARY, cursor="hand2",
         )
         tk.Checkbutton(
-            opt_sec, text="Evaluation Mode  (watch AI play, no training)",
-            variable=self.eval_var, command=self._on_eval_toggle, **_cb,
+            parent, text="Show Live Dashboard",
+            variable=self.visualize_var, **_cb,
         ).pack(anchor="w", pady=(4, 0))
         tk.Checkbutton(
-            opt_sec, text="Auto-Advance Stages  (transfer weights to next stage)",
+            parent, text="Record Video",
+            variable=self.record_var, **_cb,
+        ).pack(anchor="w")
+        tk.Checkbutton(
+            parent, text="Evaluation Mode  (watch AI play, no training)",
+            variable=self.eval_var, command=self._on_eval_toggle, **_cb,
+        ).pack(anchor="w")
+        tk.Checkbutton(
+            parent, text="Auto-Advance Stages",
             variable=self.next_stage_var, **_cb,
         ).pack(anchor="w")
         tk.Checkbutton(
-            opt_sec, text="Whole Game  (curriculum learning across all 32 stages)",
+            parent, text="Whole Game  (curriculum learning)",
             variable=self.curriculum_var, **_cb,
         ).pack(anchor="w")
 
-        tk.Frame(parent, bg=BORDER_COLOR, height=1).pack(fill="x", padx=20)
+        # ── Separator ──────────────────────────────────────────────────
+        tk.Frame(parent, bg=BORDER_COLOR, height=1).pack(
+            fill="x", pady=(10, 8),
+        )
 
         # ── Compute ────────────────────────────────────────────────────
-        compute_sec = tk.Frame(parent, bg=BG_DARK, pady=12, **pad)
-        compute_sec.pack(fill="x")
-
         tk.Label(
-            compute_sec, text="COMPUTE",
+            parent, text="COMPUTE",
             font=("Segoe UI", 8, "bold"), fg=TEXT_DIM, bg=BG_DARK,
         ).pack(anchor="w")
 
-        compute_row = tk.Frame(compute_sec, bg=BG_DARK)
+        compute_row = tk.Frame(parent, bg=BG_DARK)
         compute_row.pack(fill="x", pady=(4, 0))
 
+        dev_col = tk.Frame(compute_row, bg=BG_DARK)
+        dev_col.pack(side="left", padx=(0, 20))
+        tk.Label(dev_col, text="Device", font=("Segoe UI", 9),
+                 fg=TEXT_DIM, bg=BG_DARK).pack(anchor="w")
+        ttk.Combobox(
+            dev_col, textvariable=self.device_var,
+            values=["auto", "cuda", "mps", "cpu"],
+            state="readonly", width=8,
+        ).pack(anchor="w", pady=(2, 0))
+
         env_col = tk.Frame(compute_row, bg=BG_DARK)
-        env_col.pack(side="left", padx=(0, 30))
+        env_col.pack(side="left")
         tk.Label(env_col, text="Parallel Envs", font=("Segoe UI", 9),
                  fg=TEXT_DIM, bg=BG_DARK).pack(anchor="w")
         ttk.Combobox(
@@ -593,28 +725,18 @@ class MarioLauncher:
             state="readonly", width=6,
         ).pack(anchor="w", pady=(2, 0))
 
-        dev_col = tk.Frame(compute_row, bg=BG_DARK)
-        dev_col.pack(side="left")
-        tk.Label(dev_col, text="Device  (auto = CUDA→MPS→CPU)", font=("Segoe UI", 9),
-                 fg=TEXT_DIM, bg=BG_DARK).pack(anchor="w")
-        ttk.Combobox(
-            dev_col, textvariable=self.device_var,
-            values=["auto", "cuda", "mps", "cpu"],
-            state="readonly", width=8,
-        ).pack(anchor="w", pady=(2, 0))
-
-        tk.Frame(parent, bg=BORDER_COLOR, height=1).pack(fill="x", padx=20)
+        # ── Separator ──────────────────────────────────────────────────
+        tk.Frame(parent, bg=BORDER_COLOR, height=1).pack(
+            fill="x", pady=(10, 8),
+        )
 
         # ── Model loader ───────────────────────────────────────────────
-        model_sec = tk.Frame(parent, bg=BG_DARK, pady=12, **pad)
-        model_sec.pack(fill="x")
-
         tk.Label(
-            model_sec, text="LOAD MODEL",
+            parent, text="LOAD MODEL",
             font=("Segoe UI", 8, "bold"), fg=TEXT_DIM, bg=BG_DARK,
         ).pack(anchor="w")
 
-        model_row = tk.Frame(model_sec, bg=BG_DARK)
+        model_row = tk.Frame(parent, bg=BG_DARK)
         model_row.pack(fill="x", pady=(4, 0))
 
         self.model_display = tk.Label(
@@ -640,122 +762,160 @@ class MarioLauncher:
             command=self._clear_model,
         ).pack(side="left", padx=(3, 0))
 
-    def _build_stream_tab(self, parent):
-        """Tab 3: Streaming keys, music, ROM import, folder shortcuts."""
-        pad = {'padx': 20}
+    def _build_extras_section(self, parent):
+        """Collapsible panel: streaming, music, ROM import, folder shortcuts."""
+        # Toggle bar
+        self.extras_toggle = tk.Frame(parent, bg=BG_MEDIUM, cursor="hand2")
+        self.extras_toggle.pack(fill="x")
 
-        # ── Live streaming ─────────────────────────────────────────────
-        stream_sec = tk.Frame(parent, bg=BG_DARK, pady=12, **pad)
-        stream_sec.pack(fill="x")
+        self.extras_arrow = tk.Label(
+            self.extras_toggle,
+            text="▸  Streaming & Extras",
+            font=("Segoe UI", 10, "bold"),
+            fg=TEXT_DIM, bg=BG_MEDIUM,
+            padx=20, pady=6,
+        )
+        self.extras_arrow.pack(anchor="w")
+
+        # Make the whole bar clickable
+        for widget in [self.extras_toggle, self.extras_arrow]:
+            widget.bind("<Button-1>", lambda e: self._toggle_extras())
+
+        # Content frame (hidden by default)
+        self.extras_content = tk.Frame(parent, bg=BG_DARK)
+        # Don't pack yet — starts hidden
+
+        self._build_extras_content(self.extras_content)
+
+    def _build_extras_content(self, parent):
+        """Build the extras panel contents."""
+        inner = tk.Frame(parent, bg=BG_DARK, padx=20, pady=8)
+        inner.pack(fill="x")
+
+        # Row with 3 sections side by side
+        inner.columnconfigure(0, weight=1)
+        inner.columnconfigure(1, weight=1)
+        inner.columnconfigure(2, weight=1)
+
+        # ── Streaming ──────────────────────────────────────────────────
+        stream_col = tk.Frame(inner, bg=BG_DARK)
+        stream_col.grid(row=0, column=0, sticky="nw", padx=(0, 15))
 
         tk.Label(
-            stream_sec, text="LIVE STREAMING",
+            stream_col, text="STREAMING",
             font=("Segoe UI", 8, "bold"), fg=TEXT_DIM, bg=BG_DARK,
         ).pack(anchor="w")
 
         tk.Checkbutton(
-            stream_sec, text="Enable Live Streaming  (Twitch / YouTube)",
+            stream_col, text="Enable Streaming",
             variable=self.stream_var,
-            font=("Segoe UI", 10), fg=ACCENT_RED, bg=BG_DARK,
+            font=("Segoe UI", 9), fg=ACCENT_RED, bg=BG_DARK,
             selectcolor=BG_MEDIUM, activebackground=BG_DARK,
             activeforeground=ACCENT_RED, cursor="hand2",
-        ).pack(anchor="w", pady=(4, 0))
+        ).pack(anchor="w", pady=(2, 0))
 
-        tk.Label(stream_sec, text="Twitch Stream Key:", font=("Segoe UI", 9),
-                 fg=TEXT_DIM, bg=BG_DARK).pack(anchor="w", pady=(6, 0))
+        tk.Label(stream_col, text="Twitch Key:", font=("Segoe UI", 8),
+                 fg=TEXT_DIM, bg=BG_DARK).pack(anchor="w", pady=(4, 0))
         tk.Entry(
-            stream_sec, textvariable=self.twitch_key_var, show="*",
-            font=("Segoe UI", 10), bg=BG_MEDIUM, fg=TEXT_PRIMARY,
-            insertbackground=TEXT_PRIMARY, relief="flat",
-        ).pack(fill="x", pady=2)
+            stream_col, textvariable=self.twitch_key_var, show="*",
+            font=("Segoe UI", 9), bg=BG_MEDIUM, fg=TEXT_PRIMARY,
+            insertbackground=TEXT_PRIMARY, relief="flat", width=20,
+        ).pack(fill="x", pady=1)
 
-        tk.Label(stream_sec, text="YouTube Stream Key:", font=("Segoe UI", 9),
-                 fg=TEXT_DIM, bg=BG_DARK).pack(anchor="w", pady=(5, 0))
+        tk.Label(stream_col, text="YouTube Key:", font=("Segoe UI", 8),
+                 fg=TEXT_DIM, bg=BG_DARK).pack(anchor="w", pady=(3, 0))
         tk.Entry(
-            stream_sec, textvariable=self.youtube_key_var, show="*",
-            font=("Segoe UI", 10), bg=BG_MEDIUM, fg=TEXT_PRIMARY,
-            insertbackground=TEXT_PRIMARY, relief="flat",
-        ).pack(fill="x", pady=2)
+            stream_col, textvariable=self.youtube_key_var, show="*",
+            font=("Segoe UI", 9), bg=BG_MEDIUM, fg=TEXT_PRIMARY,
+            insertbackground=TEXT_PRIMARY, relief="flat", width=20,
+        ).pack(fill="x", pady=1)
 
-        tk.Frame(parent, bg=BORDER_COLOR, height=1).pack(fill="x", padx=20)
-
-        # ── Music ──────────────────────────────────────────────────────
-        music_sec = tk.Frame(parent, bg=BG_DARK, pady=12, **pad)
-        music_sec.pack(fill="x")
+        # ── Music + ROM ────────────────────────────────────────────────
+        mid_col = tk.Frame(inner, bg=BG_DARK)
+        mid_col.grid(row=0, column=1, sticky="nw", padx=15)
 
         tk.Label(
-            music_sec, text="MUSIC",
+            mid_col, text="MUSIC & ROMs",
             font=("Segoe UI", 8, "bold"), fg=TEXT_DIM, bg=BG_DARK,
         ).pack(anchor="w")
+
         tk.Checkbutton(
-            music_sec, text="Play Background Music during training",
+            mid_col, text="Background Music",
             variable=self.music_var,
-            font=("Segoe UI", 10), fg=TEXT_PRIMARY, bg=BG_DARK,
+            font=("Segoe UI", 9), fg=TEXT_PRIMARY, bg=BG_DARK,
             selectcolor=BG_MEDIUM, activebackground=BG_DARK,
             activeforeground=TEXT_PRIMARY, cursor="hand2",
-        ).pack(anchor="w", pady=(4, 0))
+        ).pack(anchor="w", pady=(2, 0))
 
-        tk.Frame(parent, bg=BORDER_COLOR, height=1).pack(fill="x", padx=20)
-
-        # ── ROM import ─────────────────────────────────────────────────
-        rom_sec = tk.Frame(parent, bg=BG_DARK, pady=12, **pad)
-        rom_sec.pack(fill="x")
-
-        tk.Label(
-            rom_sec, text="ROM IMPORT  (stable-retro)",
-            font=("Segoe UI", 8, "bold"), fg=TEXT_DIM, bg=BG_DARK,
-        ).pack(anchor="w")
-        tk.Label(
-            rom_sec, text="Import legally obtained ROMs for retro games",
-            font=("Segoe UI", 9), fg=TEXT_DIM, bg=BG_DARK,
-        ).pack(anchor="w", pady=(2, 4))
         tk.Button(
-            rom_sec, text="Import ROM Directory...",
-            font=("Segoe UI", 10), bg=BG_MEDIUM, fg=TEXT_PRIMARY,
+            mid_col, text="Import ROM Directory...",
+            font=("Segoe UI", 9), bg=BG_MEDIUM, fg=TEXT_PRIMARY,
             activebackground=BG_LIGHT, activeforeground=TEXT_PRIMARY,
-            relief="flat", cursor="hand2", padx=12,
+            relief="flat", cursor="hand2", padx=8,
             command=self._import_rom,
-        ).pack(anchor="w")
+        ).pack(anchor="w", pady=(8, 0))
+
         self.rom_status = tk.Label(
-            rom_sec, text="",
-            font=("Segoe UI", 9), fg=TEXT_DIM, bg=BG_DARK,
-            wraplength=400, justify="left",
+            mid_col, text="",
+            font=("Segoe UI", 8), fg=TEXT_DIM, bg=BG_DARK,
+            wraplength=250, justify="left",
         )
-        self.rom_status.pack(anchor="w", pady=(4, 0))
+        self.rom_status.pack(anchor="w", pady=(2, 0))
 
-        tk.Frame(parent, bg=BORDER_COLOR, height=1).pack(fill="x", padx=20)
-
-        # ── Quick-access folder buttons ────────────────────────────────
-        folder_sec = tk.Frame(parent, bg=BG_DARK, pady=12, **pad)
-        folder_sec.pack(fill="x")
+        # ── Quick access ───────────────────────────────────────────────
+        right_col = tk.Frame(inner, bg=BG_DARK)
+        right_col.grid(row=0, column=2, sticky="nw", padx=(15, 0))
 
         tk.Label(
-            folder_sec, text="QUICK ACCESS",
+            right_col, text="QUICK ACCESS",
             font=("Segoe UI", 8, "bold"), fg=TEXT_DIM, bg=BG_DARK,
         ).pack(anchor="w")
-
-        btn_row = tk.Frame(folder_sec, bg=BG_DARK)
-        btn_row.pack(fill="x", pady=(4, 0))
 
         for label, cmd in [
-            ("Open Models Folder",      lambda: self._open_folder(MODELS_DIR)),
-            ("Open Recordings Folder",  lambda: self._open_folder(RECORDINGS_DIR)),
-            ("Compare Runs",            self._open_comparison),
+            ("Open Models Folder",     lambda: self._open_folder(MODELS_DIR)),
+            ("Open Recordings Folder", lambda: self._open_folder(RECORDINGS_DIR)),
+            ("Compare Runs",           self._open_comparison),
         ]:
             tk.Button(
-                btn_row, text=label,
+                right_col, text=label,
                 font=("Segoe UI", 9), bg=BG_MEDIUM, fg=TEXT_DIM,
                 activebackground=BG_LIGHT, activeforeground=TEXT_PRIMARY,
-                relief="flat", cursor="hand2", padx=10,
+                relief="flat", cursor="hand2", padx=8, pady=3,
                 command=cmd,
-            ).pack(side="left", expand=True, fill="x", padx=2)
+            ).pack(anchor="w", fill="x", pady=2)
+
+    def _toggle_extras(self, save=True):
+        """Show/hide the extras panel."""
+        if self._extras_expanded:
+            self.extras_content.pack_forget()
+            self.extras_arrow.configure(text="▸  Streaming & Extras")
+            self._extras_expanded = False
+        else:
+            # Insert before the start area (which is packed last)
+            self.extras_content.pack(fill="x", before=self._start_area_sep)
+            self.extras_arrow.configure(text="▾  Streaming & Extras")
+            self._extras_expanded = True
+
+        if save:
+            self._schedule_save()
 
     def _build_start_area(self):
         """Always-visible START/STOP button and status bar at the bottom."""
-        tk.Frame(self.root, bg=BORDER_COLOR, height=1).pack(fill="x")
+        self._start_area_sep = tk.Frame(self.root, bg=BORDER_COLOR, height=1)
+        self._start_area_sep.pack(fill="x", side="bottom")
 
         area = tk.Frame(self.root, bg=BG_DARK, padx=20, pady=10)
-        area.pack(fill="x")
+        area.pack(fill="x", side="bottom")
+
+        self.status_label = tk.Label(
+            area,
+            text="Ready — Pick a game and algorithm, then click START!",
+            font=("Segoe UI", 9),
+            fg=TEXT_DIM,
+            bg=BG_DARK,
+            anchor="w",
+        )
+        self.status_label.pack(fill="x", pady=(0, 4))
 
         self.start_btn = tk.Button(
             area,
@@ -772,15 +932,9 @@ class MarioLauncher:
         )
         self.start_btn.pack(fill="x")
 
-        self.status_label = tk.Label(
-            area,
-            text="Ready — Pick a game and algorithm, then click START to begin training!",
-            font=("Segoe UI", 9),
-            fg=TEXT_DIM,
-            bg=BG_DARK,
-            anchor="w",
-        )
-        self.status_label.pack(fill="x", pady=(4, 0))
+    # ===================================================================
+    # Helper Methods
+    # ===================================================================
 
     def _update_algo_desc(self):
         """Update the algorithm description text below the buttons."""
@@ -832,7 +986,6 @@ class MarioLauncher:
 
     def _rebuild_game_options(self):
         """Rebuild the dynamic game-specific options widgets."""
-        # Clear existing widgets
         for widget in self.game_opts_frame.winfo_children():
             widget.destroy()
         self.game_opt_widgets.clear()
@@ -921,7 +1074,6 @@ class MarioLauncher:
         if adapter:
             supported = adapter.supported_algorithms()
             current = self.selected_algo.get()
-            # If current algo is no longer supported, switch to first supported
             if current not in supported and supported:
                 self.selected_algo.set(supported[0])
                 self._update_duration_label()
@@ -937,7 +1089,6 @@ class MarioLauncher:
         self._update_algo_buttons()
         self._update_algo_desc()
         self._update_duration_label()
-        # Clear loaded model when switching algorithms
         self.model_path_var.set("")
         self._update_model_display()
 
@@ -952,7 +1103,6 @@ class MarioLauncher:
 
         for algo, btn in self.algo_buttons.items():
             if algo not in supported:
-                # Incompatible — gray out and disable
                 btn.configure(
                     bg=BG_DARK, fg="#555555", activebackground=BG_DARK,
                     state="disabled",
@@ -983,8 +1133,6 @@ class MarioLauncher:
         algo = self.selected_algo.get()
         info = ALGO_INFO[algo]
         initial_dir = os.path.join(MODELS_DIR, info["model_subdir"])
-
-        # Create the directory if it doesn't exist
         os.makedirs(initial_dir, exist_ok=True)
 
         path = filedialog.askopenfilename(
@@ -1006,7 +1154,6 @@ class MarioLauncher:
         """Update the model path display label."""
         path = self.model_path_var.get()
         if path:
-            # Show just the filename for cleanliness
             display = os.path.basename(path)
             self.model_display.configure(text=display, fg=TEXT_PRIMARY)
         else:
@@ -1015,14 +1162,12 @@ class MarioLauncher:
     def _update_start_button_text(self):
         """Update button text based on eval mode and running state."""
         if self.process is not None:
-            # Training/eval is running — show STOP
             self.start_btn.configure(
                 text="\u23F9   STOP",
                 bg=ACCENT_RED,
                 activebackground="#e63946",
             )
         else:
-            # Idle — show START TRAINING or START EVALUATION
             if self.eval_var.get():
                 self.start_btn.configure(
                     text="\u25B6   START EVALUATION",
@@ -1072,7 +1217,6 @@ class MarioLauncher:
             if result.returncode == 0:
                 output = result.stdout.strip() or "Import complete."
                 self.rom_status.configure(text=output, fg=ACCENT_GREEN)
-                # Refresh game registry to pick up newly available games
                 self.game_registry.discover()
                 self.available_games = self.game_registry.list_games()
                 game_names = [
@@ -1103,10 +1247,8 @@ class MarioLauncher:
     def _on_start_stop(self):
         """Handle the START / STOP button click."""
         if self.process is not None:
-            # Currently running — stop it
             self._stop_training()
         else:
-            # Idle — start training
             self._start_training()
 
     def _start_training(self):
@@ -1127,7 +1269,7 @@ class MarioLauncher:
         game_text = self.game_combo.get()
         game_id = game_text.rsplit("(", 1)[-1].rstrip(")").strip() if "(" in game_text else "mario"
 
-        # Build the command — use venv Python so all deps are available
+        # Build the command
         cmd = [
             VENV_PYTHON,
             MAIN_SCRIPT,
@@ -1137,42 +1279,29 @@ class MarioLauncher:
             "--stage", stage,
         ]
 
-        # Add visualization flag
         if self.visualize_var.get():
             cmd.append("--visualize")
-
-        # Add record flag
         if self.record_var.get():
             cmd.append("--record")
-
-        # Add eval flag
         if is_eval:
             cmd.append("--eval")
-
-        # Add stage progression flag
         if self.next_stage_var.get() and not is_eval:
             cmd.append("--next-stage")
-
-        # Add curriculum flag
         if self.curriculum_var.get() and not is_eval:
             cmd.append("--curriculum")
 
-        # Add parallel environments
         num_envs = self.num_envs_var.get()
         if num_envs and int(num_envs) > 1:
             cmd.extend(["--num-envs", num_envs])
 
-        # Add model loading
         if model_path:
             cmd.extend(["--load", model_path])
 
-        # Add duration (episodes/generations/timesteps)
         if duration:
             try:
                 val = int(duration)
                 if val <= 0:
                     raise ValueError
-                # For PPO/A2C/DT, the GUI shows "×1000", so multiply
                 if algo in ("ppo", "a2c", "dt"):
                     val = val * 1000
                 cmd.extend(["--episodes", str(val)])
@@ -1180,7 +1309,6 @@ class MarioLauncher:
                 self._set_status("Invalid number for duration.", ACCENT_RED)
                 return
 
-        # Add streaming flags
         if self.stream_var.get():
             twitch_key = self.twitch_key_var.get().strip()
             youtube_key = self.youtube_key_var.get().strip()
@@ -1194,7 +1322,6 @@ class MarioLauncher:
             if youtube_key:
                 cmd.extend(["--stream-youtube", youtube_key])
 
-        # Add music flag
         if self.music_var.get():
             music_dir = self.music_dir_var.get().strip()
             if not music_dir or not os.path.isdir(music_dir):
@@ -1202,12 +1329,10 @@ class MarioLauncher:
             else:
                 cmd.extend(["--music", music_dir])
 
-        # Add device preference
         device = self.device_var.get()
         if device and device != 'auto':
             cmd.extend(["--device", device])
 
-        # Add game-specific options from the dynamic config panel
         game_opts = self._get_game_options()
         if game_opts:
             cmd.append("--game-opts")
@@ -1216,8 +1341,6 @@ class MarioLauncher:
 
         # Launch the subprocess
         try:
-            # CREATE_NEW_PROCESS_GROUP allows sending CTRL_BREAK_EVENT
-            # for graceful shutdown on Windows
             self.process = subprocess.Popen(
                 cmd,
                 cwd=PROJECT_ROOT,
@@ -1227,7 +1350,6 @@ class MarioLauncher:
             self._set_status(f"Failed to start: {e}", ACCENT_RED)
             return
 
-        # Update UI
         mode = "Evaluating" if is_eval else "Training"
         self._set_status(
             f"{mode} {algo.upper()} on World {world}-{stage}...",
@@ -1236,22 +1358,82 @@ class MarioLauncher:
         self._update_start_button_text()
         self._disable_controls(True)
 
-        # Start polling the process
+        # Save settings before training (captures current state)
+        self._save_settings()
+
         self.root.after(500, self._check_process)
 
     def _stop_training(self):
-        """Stop the running training subprocess gracefully."""
-        if self.process is not None:
-            try:
-                # Send CTRL_BREAK_EVENT on Windows — this triggers the
-                # signal handler in base_trainer.py which saves the model
-                # before shutting down gracefully.
-                os.kill(self.process.pid, signal.CTRL_BREAK_EVENT)
-                self._set_status("Stopping... (saving model)", ACCENT_ORANGE)
-            except Exception:
-                # If graceful shutdown fails, force terminate
-                self.process.terminate()
-                self._set_status("Force stopped.", ACCENT_RED)
+        """Stop the running training subprocess with graduated shutdown.
+
+        Graduated approach:
+        1. Send CTRL_C_EVENT (maps to SIGINT — the trainer has a handler)
+        2. Poll for 5 seconds
+        3. Escalate to terminate()
+        4. After 2 more seconds → kill()
+        """
+        if self.process is None:
+            return
+
+        self._set_status("Stopping... (saving model)", ACCENT_ORANGE)
+
+        # Step 1: Send CTRL_C_EVENT (triggers SIGINT handler in trainer)
+        try:
+            os.kill(self.process.pid, signal.CTRL_C_EVENT)
+        except (OSError, PermissionError):
+            pass
+
+        # Step 2: Poll for up to 5 seconds
+        self._graduated_shutdown_poll(attempts=10)
+
+    def _graduated_shutdown_poll(self, attempts):
+        """Poll subprocess during graduated shutdown."""
+        if self.process is None:
+            return
+
+        retcode = self.process.poll()
+        if retcode is not None:
+            # Process exited cleanly
+            self._on_process_finished(retcode)
+            return
+
+        if attempts > 0:
+            # Still running — check again in 500ms
+            self.root.after(
+                500,
+                lambda: self._graduated_shutdown_poll(attempts - 1),
+            )
+            return
+
+        # Step 3: Escalate to terminate()
+        self._set_status("Force stopping...", ACCENT_RED)
+        try:
+            self.process.terminate()
+        except OSError:
+            pass
+
+        # Step 4: Wait 2 more seconds then kill
+        self.root.after(2000, self._force_kill_if_running)
+
+    def _force_kill_if_running(self):
+        """Final escalation: kill the process if it's still alive."""
+        if self.process is None:
+            return
+
+        retcode = self.process.poll()
+        if retcode is not None:
+            self._on_process_finished(retcode)
+            return
+
+        try:
+            self.process.kill()
+        except OSError:
+            pass
+
+        self.process = None
+        self._disable_controls(False)
+        self._update_start_button_text()
+        self._set_status("Process killed.", ACCENT_RED)
 
     def _check_process(self):
         """Poll the subprocess to see if it's still running."""
@@ -1260,24 +1442,26 @@ class MarioLauncher:
 
         retcode = self.process.poll()
         if retcode is None:
-            # Still running — check again in 500ms
             self.root.after(500, self._check_process)
         else:
-            # Process finished
-            self.process = None
-            self._disable_controls(False)
-            self._update_start_button_text()
+            self._on_process_finished(retcode)
 
-            if retcode == 0:
-                self._set_status(
-                    "Finished. Check models/ for saved checkpoints.",
-                    ACCENT_GREEN,
-                )
-            else:
-                self._set_status(
-                    f"Process exited with code {retcode}.",
-                    ACCENT_ORANGE,
-                )
+    def _on_process_finished(self, retcode):
+        """Handle subprocess completion."""
+        self.process = None
+        self._disable_controls(False)
+        self._update_start_button_text()
+
+        if retcode == 0:
+            self._set_status(
+                "Finished. Check models/ for saved checkpoints.",
+                ACCENT_GREEN,
+            )
+        else:
+            self._set_status(
+                f"Process exited with code {retcode}.",
+                ACCENT_ORANGE,
+            )
 
     def _set_status(self, text, color=TEXT_DIM):
         """Update the status bar text and color."""
@@ -1289,23 +1473,70 @@ class MarioLauncher:
             for btn in self.algo_buttons.values():
                 btn.configure(state="disabled")
         else:
-            # Re-enable only supported algorithms
             self._update_algo_buttons()
 
     def _open_folder(self, path):
-        """Open a folder in Windows Explorer."""
+        """Open a folder in the file manager."""
         os.makedirs(path, exist_ok=True)
-        # os.startfile is Windows-specific
-        os.startfile(path)
+        if sys.platform == "win32":
+            os.startfile(path)
+        elif sys.platform == "darwin":
+            subprocess.run(["open", path])
+        else:
+            subprocess.run(["xdg-open", path])
 
     def _on_close(self):
-        """Handle window close — stop training if running."""
-        if self.process is not None:
-            self._stop_training()
-            # Give it a moment to save, then close
-            self.root.after(2000, self.root.destroy)
-        else:
+        """Handle window close — stop training if running, save settings."""
+        # Always save settings on close
+        self._save_settings()
+
+        if self.process is None:
             self.root.destroy()
+            return
+
+        # Graduated shutdown on window close
+        self._set_status("Closing... saving model", ACCENT_ORANGE)
+
+        # Send CTRL_C_EVENT
+        try:
+            os.kill(self.process.pid, signal.CTRL_C_EVENT)
+        except (OSError, PermissionError):
+            pass
+
+        # Poll for up to 5 seconds
+        self._on_close_poll(attempts=10)
+
+    def _on_close_poll(self, attempts):
+        """Poll during window-close shutdown."""
+        if self.process is None or self.process.poll() is not None:
+            self.process = None
+            self.root.destroy()
+            return
+
+        if attempts > 0:
+            self.root.after(500, lambda: self._on_close_poll(attempts - 1))
+            return
+
+        # Escalate: terminate
+        try:
+            self.process.terminate()
+        except OSError:
+            pass
+
+        # Wait 2 more seconds then force destroy
+        self.root.after(2000, self._on_close_force)
+
+    def _on_close_force(self):
+        """Final window close — kill process and destroy."""
+        if self.process is not None:
+            retcode = self.process.poll()
+            if retcode is None:
+                try:
+                    self.process.kill()
+                except OSError:
+                    pass
+            self.process = None
+        self.root.destroy()
 
     # ===================================================================
     # Run
