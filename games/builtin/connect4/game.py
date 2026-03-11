@@ -134,48 +134,72 @@ class ConnectFourEnv(gym.Env):
                          interpolation=cv2.INTER_NEAREST)
         return np.expand_dims(obs, axis=-1)
 
+    # High-res rendering for the dashboard
+    DISPLAY_SIZE = 480
+
     def _render_rgb(self) -> np.ndarray:
-        """Render a colorful Connect Four board for dashboard/stream.
+        """Render a polished Connect Four board for dashboard/stream.
 
-        Blue board with red/yellow circular pieces — classic colors.
-        Empty slots are dark circles cut into the blue board.
+        Renders at 480px. Rich blue board with rounded slot holes,
+        red/yellow pieces with 3D highlight and shadow effects.
         """
-        # Cell size in pixels
-        cell_px = self.render_size // max(ROWS, COLS)
-        board_w = cell_px * COLS
-        board_h = cell_px * ROWS
-        img = np.zeros((board_h, board_w, 3), dtype=np.uint8)
+        size = self.DISPLAY_SIZE
+        cell = size // max(ROWS, COLS)  # ~68px per cell
+        board_w = cell * COLS
+        board_h = cell * ROWS
+        # Center the board in a square canvas
+        img = np.zeros((size, size, 3), dtype=np.uint8)
+        img[:] = (15, 15, 32)  # Dark background behind board
 
-        # Blue board background
-        img[:] = (30, 60, 180)
+        # Offset to center the board
+        ox = (size - board_w) // 2
+        oy = (size - board_h) // 2
 
-        radius = max(2, cell_px // 2 - 2)
+        # Board background with rounded rect effect
+        cv2.rectangle(img, (ox - 4, oy - 4),
+                      (ox + board_w + 4, oy + board_h + 4),
+                      (25, 50, 160), -1)  # Outer blue
+        cv2.rectangle(img, (ox, oy),
+                      (ox + board_w, oy + board_h),
+                      (35, 65, 190), -1)  # Inner blue
+
+        radius = max(4, cell // 2 - 5)
 
         for r in range(ROWS):
             for c in range(COLS):
-                cx = c * cell_px + cell_px // 2
-                cy = r * cell_px + cell_px // 2
+                cx = ox + c * cell + cell // 2
+                cy = oy + r * cell + cell // 2
 
                 if self.board[r, c] == 0:
-                    # Empty slot: dark circle
-                    cv2.circle(img, (cx, cy), radius, (15, 15, 30), -1)
+                    # Empty slot: dark recessed hole
+                    cv2.circle(img, (cx, cy), radius + 2, (20, 35, 120),
+                               -1, cv2.LINE_AA)
+                    cv2.circle(img, (cx, cy), radius, (12, 12, 28),
+                               -1, cv2.LINE_AA)
                 elif self.board[r, c] == 1:
-                    # Player 1: red piece with highlight
-                    cv2.circle(img, (cx, cy), radius, (220, 50, 50), -1)
-                    # Highlight (smaller, offset circle for 3D look)
-                    if radius > 4:
-                        cv2.circle(img, (cx - 1, cy - 1), radius // 3,
-                                   (255, 120, 120), -1)
+                    # Player 1: red piece with 3D effect
+                    cv2.circle(img, (cx + 1, cy + 1), radius, (120, 20, 20),
+                               -1, cv2.LINE_AA)  # Shadow
+                    cv2.circle(img, (cx, cy), radius, (220, 45, 45),
+                               -1, cv2.LINE_AA)  # Main
+                    cv2.circle(img, (cx, cy), radius, (240, 70, 70),
+                               2, cv2.LINE_AA)   # Edge
+                    # Highlight for 3D
+                    hl_r = max(3, radius // 3)
+                    cv2.circle(img, (cx - radius // 4, cy - radius // 4),
+                               hl_r, (255, 140, 140), -1, cv2.LINE_AA)
                 elif self.board[r, c] == 2:
-                    # Player 2: yellow piece with highlight
-                    cv2.circle(img, (cx, cy), radius, (240, 210, 40), -1)
-                    if radius > 4:
-                        cv2.circle(img, (cx - 1, cy - 1), radius // 3,
-                                   (255, 240, 140), -1)
+                    # Player 2: yellow piece with 3D effect
+                    cv2.circle(img, (cx + 1, cy + 1), radius, (120, 105, 15),
+                               -1, cv2.LINE_AA)  # Shadow
+                    cv2.circle(img, (cx, cy), radius, (240, 210, 35),
+                               -1, cv2.LINE_AA)  # Main
+                    cv2.circle(img, (cx, cy), radius, (250, 230, 80),
+                               2, cv2.LINE_AA)   # Edge
+                    hl_r = max(3, radius // 3)
+                    cv2.circle(img, (cx - radius // 4, cy - radius // 4),
+                               hl_r, (255, 245, 150), -1, cv2.LINE_AA)
 
-        # Resize to render_size square
-        img = cv2.resize(img, (self.render_size, self.render_size),
-                         interpolation=cv2.INTER_LINEAR)
         return img
 
     def render(self, mode='rgb_array'):

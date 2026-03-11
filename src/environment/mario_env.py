@@ -31,7 +31,10 @@ Usage:
     env = create_mario_env(world=1, stage=1)
 """
 
-import gym
+try:
+    import gymnasium as gym
+except ImportError:
+    import gym  # Legacy fallback
 from gym_super_mario_bros import SuperMarioBrosEnv
 from gym_super_mario_bros.actions import SIMPLE_MOVEMENT, RIGHT_ONLY, COMPLEX_MOVEMENT
 from nes_py.wrappers import JoypadSpace

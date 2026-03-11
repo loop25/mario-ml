@@ -231,42 +231,80 @@ class CheckersEnv(gym.Env):
                          interpolation=cv2.INTER_NEAREST)
         return np.expand_dims(obs, axis=-1)
 
+    # High-res rendering for the dashboard
+    DISPLAY_SIZE = 480
+
     def _render_rgb(self) -> np.ndarray:
-        """Render a colorful checkers board for dashboard display."""
-        size = self.render_size
-        cell = size // 8
+        """Render a polished checkers board for dashboard display.
+
+        Renders at 480px. Rich wood-toned board with 3D pieces —
+        dark pieces with gray highlights, red pieces with warm tones,
+        golden crown rings for kings.
+        """
+        import math
+
+        size = self.DISPLAY_SIZE
+        cell = size // 8  # 60px per cell
         img = np.zeros((size, size, 3), dtype=np.uint8)
 
-        # Draw board squares
+        # Draw board squares with richer colors
         for r in range(8):
             for c in range(8):
                 x1, y1 = c * cell, r * cell
                 x2, y2 = x1 + cell, y1 + cell
                 if (r + c) % 2 == 0:
-                    img[y1:y2, x1:x2] = (200, 190, 160)  # Light tan
+                    img[y1:y2, x1:x2] = (220, 205, 170)  # Warm cream
                 else:
-                    img[y1:y2, x1:x2] = (60, 100, 60)    # Dark green
+                    img[y1:y2, x1:x2] = (55, 95, 55)      # Forest green
 
-        # Draw pieces
-        radius = max(2, cell // 2 - 2)
+        # Draw pieces with 3D shading
+        radius = max(6, cell // 2 - 6)
+
         for pos in range(NUM_SQUARES):
             r, c = _pos_to_rc(pos)
             cx = c * cell + cell // 2
             cy = r * cell + cell // 2
             piece = self.board[pos]
 
-            if piece == P1_MAN:
-                cv2.circle(img, (cx, cy), radius, (40, 40, 40), -1)
-                cv2.circle(img, (cx, cy), radius, (80, 80, 80), 1)
-            elif piece == P1_KING:
-                cv2.circle(img, (cx, cy), radius, (40, 40, 40), -1)
-                cv2.circle(img, (cx, cy), radius, (200, 200, 60), 2)
-            elif piece == P2_MAN:
-                cv2.circle(img, (cx, cy), radius, (180, 50, 50), -1)
-                cv2.circle(img, (cx, cy), radius, (220, 100, 100), 1)
-            elif piece == P2_KING:
-                cv2.circle(img, (cx, cy), radius, (180, 50, 50), -1)
-                cv2.circle(img, (cx, cy), radius, (200, 200, 60), 2)
+            if piece == EMPTY:
+                continue
+
+            if piece in (P1_MAN, P1_KING):
+                # Dark piece: charcoal with 3D shading
+                cv2.circle(img, (cx + 2, cy + 2), radius, (20, 20, 20),
+                           -1, cv2.LINE_AA)  # Shadow
+                cv2.circle(img, (cx, cy), radius, (50, 48, 48),
+                           -1, cv2.LINE_AA)  # Base
+                cv2.circle(img, (cx, cy), radius, (75, 72, 72),
+                           2, cv2.LINE_AA)    # Edge ring
+                # Highlight
+                hl_r = max(3, radius // 3)
+                cv2.circle(img, (cx - radius // 4, cy - radius // 4),
+                           hl_r, (90, 88, 88), -1, cv2.LINE_AA)
+            else:
+                # Red piece: crimson with 3D shading
+                cv2.circle(img, (cx + 2, cy + 2), radius, (80, 15, 15),
+                           -1, cv2.LINE_AA)  # Shadow
+                cv2.circle(img, (cx, cy), radius, (190, 45, 40),
+                           -1, cv2.LINE_AA)  # Base
+                cv2.circle(img, (cx, cy), radius, (220, 80, 75),
+                           2, cv2.LINE_AA)    # Edge ring
+                # Highlight
+                hl_r = max(3, radius // 3)
+                cv2.circle(img, (cx - radius // 4, cy - radius // 4),
+                           hl_r, (240, 120, 115), -1, cv2.LINE_AA)
+
+            # Golden crown ring for kings
+            if piece in (P1_KING, P2_KING):
+                crown_r = max(4, radius * 2 // 3)
+                cv2.circle(img, (cx, cy), crown_r, (210, 190, 50),
+                           2, cv2.LINE_AA)
+                # Small crown dots
+                for angle_deg in (-30, 0, 30):
+                    ax = int(cx + crown_r * 0.6 * math.cos(math.radians(angle_deg - 90)))
+                    ay = int(cy + crown_r * 0.6 * math.sin(math.radians(angle_deg - 90)))
+                    cv2.circle(img, (ax, ay), 2, (255, 220, 60),
+                               -1, cv2.LINE_AA)
 
         return img
 

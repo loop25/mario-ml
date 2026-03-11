@@ -20,8 +20,12 @@ References:
 """
 
 import numpy as np
-import gym
-from gym.spaces import Box
+try:
+    import gymnasium as gym
+    from gymnasium.spaces import Box
+except ImportError:
+    import gym  # Legacy fallback
+    from gym.spaces import Box
 import cv2
 from collections import deque
 

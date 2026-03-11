@@ -277,6 +277,9 @@ class MarioLauncher:
         # Load saved settings (overrides defaults above)
         self._load_settings()
 
+        # Apply game-dependent UI visibility
+        self._update_world_stage_visibility()
+
         # Set initial window position/size
         self.root.update_idletasks()
         saved_geo = getattr(self, '_saved_geometry', '')
@@ -531,22 +534,22 @@ class MarioLauncher:
         self.game_opt_widgets = {}
         self._rebuild_game_options()
 
-        # World / Stage row (for Mario / multi-level games)
-        ws_frame = tk.Frame(parent, bg=BG_DARK)
-        ws_frame.pack(fill="x", pady=(8, 0))
+        # World / Stage row (for Mario / multi-level games — hidden for others)
+        self.ws_frame = tk.Frame(parent, bg=BG_DARK)
+        self.ws_frame.pack(fill="x", pady=(8, 0))
 
-        tk.Label(ws_frame, text="World", font=("Segoe UI", 9),
+        tk.Label(self.ws_frame, text="World", font=("Segoe UI", 9),
                  fg=TEXT_DIM, bg=BG_DARK).pack(side="left")
         ttk.Combobox(
-            ws_frame, textvariable=self.world_var,
+            self.ws_frame, textvariable=self.world_var,
             values=[str(i) for i in range(1, 9)],
             state="readonly", width=4,
         ).pack(side="left", padx=(4, 12))
 
-        tk.Label(ws_frame, text="Stage", font=("Segoe UI", 9),
+        tk.Label(self.ws_frame, text="Stage", font=("Segoe UI", 9),
                  fg=TEXT_DIM, bg=BG_DARK).pack(side="left")
         ttk.Combobox(
-            ws_frame, textvariable=self.stage_var,
+            self.ws_frame, textvariable=self.stage_var,
             values=[str(i) for i in range(1, 5)],
             state="readonly", width=4,
         ).pack(side="left", padx=(4, 0))
@@ -1082,6 +1085,17 @@ class MarioLauncher:
         self._update_algo_buttons()
         self._update_algo_desc()
         self._rebuild_game_options()
+        self._update_world_stage_visibility()
+
+    def _update_world_stage_visibility(self):
+        """Show world/stage selector only for games that have levels (Mario)."""
+        game_text = self.game_combo.get()
+        game_id = game_text.rsplit("(", 1)[-1].rstrip(")").strip() if "(" in game_text else "mario"
+        # Only Mario (retro/NES) games have world/stage
+        if game_id == "mario":
+            self.ws_frame.pack(fill="x", pady=(8, 0))
+        else:
+            self.ws_frame.pack_forget()
 
     def _select_algorithm(self, algo):
         """Handle algorithm button click."""
@@ -1269,15 +1283,51 @@ class MarioLauncher:
         game_text = self.game_combo.get()
         game_id = game_text.rsplit("(", 1)[-1].rstrip(")").strip() if "(" in game_text else "mario"
 
+        # Check if the selected game has all dependencies installed
+        adapter = self._get_selected_adapter()
+        if adapter and hasattr(adapter, 'is_available') and not adapter.is_available():
+            game_display = game_text.split("(")[0].strip() if "(" in game_text else game_id
+            self._set_status(
+                f"{game_display} is not available. Check required dependencies.",
+                ACCENT_RED,
+            )
+            # Show a helpful message box with install instructions
+            try:
+                from tkinter import messagebox
+                if game_id == "chess":
+                    messagebox.showwarning(
+                        "Missing Dependency",
+                        "The Chess game requires python-chess.\n\n"
+                        "Install it with:\n  pip install python-chess",
+                    )
+                elif game_id in ("pokemon", "sonic"):
+                    messagebox.showwarning(
+                        "Missing Dependency",
+                        f"The {game_display} game requires stable-retro.\n\n"
+                        "Install it with:\n  pip install stable-retro\n\n"
+                        "You also need the game ROM imported.",
+                    )
+                else:
+                    messagebox.showwarning(
+                        "Missing Dependency",
+                        f"{game_display} is not available.\n"
+                        "Check the game's documentation for required packages.",
+                    )
+            except Exception:
+                pass
+            return
+
         # Build the command
         cmd = [
             VENV_PYTHON,
             MAIN_SCRIPT,
             "--algorithm", algo,
             "--game", game_id,
-            "--world", world,
-            "--stage", stage,
         ]
+
+        # Only pass world/stage for Mario (has levels)
+        if game_id == "mario":
+            cmd.extend(["--world", world, "--stage", stage])
 
         if self.visualize_var.get():
             cmd.append("--visualize")
@@ -1351,10 +1401,13 @@ class MarioLauncher:
             return
 
         mode = "Evaluating" if is_eval else "Training"
-        self._set_status(
-            f"{mode} {algo.upper()} on World {world}-{stage}...",
-            ALGO_INFO[algo]["color"],
-        )
+        # Game-aware status message
+        game_display = game_text.split("(")[0].strip() if "(" in game_text else game_id
+        if game_id == "mario":
+            status_msg = f"{mode} {algo.upper()} on {game_display} World {world}-{stage}..."
+        else:
+            status_msg = f"{mode} {algo.upper()} on {game_display}..."
+        self._set_status(status_msg, ALGO_INFO[algo]["color"])
         self._update_start_button_text()
         self._disable_controls(True)
 
@@ -1377,9 +1430,11 @@ class MarioLauncher:
 
         self._set_status("Stopping... (saving model)", ACCENT_ORANGE)
 
-        # Step 1: Send CTRL_C_EVENT (triggers SIGINT handler in trainer)
+        # Step 1: Send CTRL_BREAK_EVENT (triggers SIGBREAK handler in trainer)
+        # NOTE: CTRL_C_EVENT is DISABLED for processes created with
+        # CREATE_NEW_PROCESS_GROUP. Only CTRL_BREAK_EVENT can reach them.
         try:
-            os.kill(self.process.pid, signal.CTRL_C_EVENT)
+            os.kill(self.process.pid, signal.CTRL_BREAK_EVENT)
         except (OSError, PermissionError):
             pass
 

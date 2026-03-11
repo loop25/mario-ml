@@ -214,6 +214,11 @@ class GraphPanel:
             )
             ax.legend(loc='upper left', fontsize=7, facecolor=COLORS['panel_bg'],
                      edgecolor=COLORS['grid'], labelcolor=COLORS['text'])
+            # Ensure Y-axis shows a meaningful range even when rewards are flat
+            r_min, r_max = min(rewards), max(rewards)
+            if r_max - r_min < 0.5:
+                mid = (r_min + r_max) / 2
+                ax.set_ylim(mid - 1.0, mid + 1.0)
 
         x_label = 'Generation' if self.algorithm == 'neat' else 'Episode'
         ax.set_title('Reward', color=COLORS['text'], fontsize=10, fontweight='bold')
@@ -350,6 +355,7 @@ class GraphPanel:
         ax = self.axes['actions']
         ax.clear()
         ax.set_facecolor(COLORS['panel_bg'])
+        ax.grid(True, alpha=0.15, color=COLORS['grid'], axis='y')
 
         action_counts = tracker.get_values('action_distribution')
         has_actions = False
@@ -358,25 +364,38 @@ class GraphPanel:
             latest = action_counts[-1]
             if isinstance(latest, (list, np.ndarray)) and len(latest) > 0:
                 has_actions = True
+                n_actions = len(latest)
+                # Extend the action color palette if needed (cycle through)
+                bar_colors = (COLORS['actions'] * ((n_actions // len(COLORS['actions'])) + 1))[:n_actions]
+                # Use wider bars for games with few actions (fills the chart)
+                bar_width = max(0.4, min(0.85, 5.0 / max(n_actions, 1)))
                 bars = ax.bar(
-                    range(len(latest)), latest,
-                    color=COLORS['actions'][:len(latest)],
-                    edgecolor='none', alpha=0.85, zorder=3,
+                    range(n_actions), latest,
+                    width=bar_width,
+                    color=bar_colors,
+                    edgecolor='white', linewidth=0.5,
+                    alpha=0.9, zorder=3,
                 )
-                # Add value labels on top of bars
+                # Add percentage labels on top of bars
                 total = sum(latest) if sum(latest) > 0 else 1
                 for bar, count in zip(bars, latest):
                     pct = count / total * 100
+                    label_y = bar.get_height()
                     ax.text(
-                        bar.get_x() + bar.get_width() / 2, bar.get_height(),
+                        bar.get_x() + bar.get_width() / 2, label_y,
                         f'{pct:.0f}%', ha='center', va='bottom',
-                        color=COLORS['text'], fontsize=6,
+                        color=COLORS['text'], fontsize=7, fontweight='bold',
                     )
-                ax.set_xticks(range(len(latest)))
-                ax.set_xticklabels(
-                    self.action_labels[:len(latest)],
-                    rotation=30, fontsize=6,
-                )
+                ax.set_xticks(range(n_actions))
+                # Truncate long labels and adjust rotation for readability
+                labels = self.action_labels[:n_actions]
+                truncated = [l[:8] for l in labels]
+                rotation = 35 if n_actions > 5 else 0
+                ax.set_xticklabels(truncated, rotation=rotation, fontsize=7,
+                                   ha='right' if rotation else 'center')
+                # Ensure bars are always visible: set a minimum Y range
+                max_val = max(latest) if max(latest) > 0 else 1
+                ax.set_ylim(0, max_val * 1.25)  # 25% headroom for labels
 
         if not has_actions:
             ax.text(

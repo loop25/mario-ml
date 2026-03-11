@@ -139,64 +139,99 @@ class SnakeEnv(gym.Env):
                          interpolation=cv2.INTER_NEAREST)
         return np.expand_dims(obs, axis=-1)
 
+    # High-res rendering for the dashboard (independent of ML obs size)
+    DISPLAY_SIZE = 480
+
     def _render_rgb(self) -> np.ndarray:
         """Render a colorful version for dashboard/stream display.
 
-        Green snake with lighter head, red food, dark grid with
-        subtle gridlines — much more visually appealing for viewers.
+        Renders at 480px for crisp visuals. Green gradient snake with
+        rounded segments, red apple with glow, score overlay, and
+        subtle gridlines on a dark field.
         """
-        cell_px = max(2, self.render_size // self.grid_size)
-        img_size = cell_px * self.grid_size
+        size = self.DISPLAY_SIZE
+        cell = size // self.grid_size  # 30px per cell at 480/16
+        img_size = cell * self.grid_size
         img = np.zeros((img_size, img_size, 3), dtype=np.uint8)
 
-        # Background: very dark green-gray
-        img[:] = (20, 25, 20)
+        # Background: dark green-tinted field
+        img[:] = (18, 22, 18)
 
         # Subtle gridlines
         for i in range(1, self.grid_size):
-            pos = i * cell_px
-            img[pos, :] = (35, 40, 35)
-            img[:, pos] = (35, 40, 35)
+            pos = i * cell
+            cv2.line(img, (pos, 0), (pos, img_size), (30, 38, 30), 1)
+            cv2.line(img, (0, pos), (img_size, pos), (30, 38, 30), 1)
 
-        # Draw snake body (green gradient — darker tail, brighter head)
+        # Draw snake body with gradient and rounded segments
         n = len(self.snake)
-        for idx, segment in enumerate(self.snake):
+        for idx, segment in enumerate(reversed(self.snake)):
+            # Draw tail-to-head so head draws last (on top)
+            seg_idx = n - 1 - idx  # 0 = head, n-1 = tail
             r, c = segment
-            y, x = r * cell_px, c * cell_px
-            # Gradient from tail (dark green) to head (bright green)
-            brightness = 0.4 + 0.6 * (1 - idx / max(n, 1))
-            g = int(200 * brightness)
-            b_val = int(60 * brightness)
-            color = (0, g, b_val)
-            img[y + 1:y + cell_px - 1, x + 1:x + cell_px - 1] = color
+            cy_center = r * cell + cell // 2
+            cx_center = c * cell + cell // 2
+            # Gradient: tail is dark, head is bright
+            t = 1.0 - seg_idx / max(n, 1)  # 0=tail, 1=head
+            g_val = int(80 + 160 * t)
+            b_val = int(30 + 50 * t)
+            color = (10, g_val, b_val)
+            radius = cell // 2 - 2
+            cv2.circle(img, (cx_center, cy_center), radius, color, -1,
+                       lineType=cv2.LINE_AA)
+            # Subtle border
+            cv2.circle(img, (cx_center, cy_center), radius,
+                       (10, min(255, g_val + 30), b_val + 10), 1,
+                       lineType=cv2.LINE_AA)
 
-        # Snake head: brightest green with white eye
+        # Snake head with eyes and distinct color
         if self.snake:
             hr, hc = self.snake[0]
-            hy, hx = hr * cell_px, hc * cell_px
-            img[hy + 1:hy + cell_px - 1, hx + 1:hx + cell_px - 1] = (40, 230, 80)
-            # Eye (small white dot)
-            eye_y = hy + cell_px // 3
-            eye_x = hx + cell_px // 3
-            if cell_px > 4:
-                img[eye_y:eye_y + 2, eye_x:eye_x + 2] = (255, 255, 255)
+            hcy = hr * cell + cell // 2
+            hcx = hc * cell + cell // 2
+            head_r = cell // 2 - 1
+            cv2.circle(img, (hcx, hcy), head_r, (30, 220, 70), -1,
+                       lineType=cv2.LINE_AA)
+            cv2.circle(img, (hcx, hcy), head_r, (50, 255, 100), 1,
+                       lineType=cv2.LINE_AA)
+            # Eyes (direction-aware)
+            dr, dc = self._directions[self.direction]
+            eye_offset = cell // 5
+            for side in (-1, 1):
+                # Perpendicular offset for two eyes
+                ex = hcx + dc * eye_offset + (-dr) * side * (cell // 5)
+                ey = hcy + dr * eye_offset + dc * side * (cell // 5)
+                cv2.circle(img, (ex, ey), max(2, cell // 8),
+                           (255, 255, 255), -1, lineType=cv2.LINE_AA)
+                # Pupil
+                cv2.circle(img, (ex + dc, ey + dr), max(1, cell // 14),
+                           (20, 20, 20), -1, lineType=cv2.LINE_AA)
 
-        # Food: bright red with slight glow
+        # Food: bright red apple with glow
         if self.food:
             fr, fc = self.food
-            fy, fx = fr * cell_px, fc * cell_px
-            img[fy + 1:fy + cell_px - 1, fx + 1:fx + cell_px - 1] = (220, 50, 50)
-            # Glow effect (lighter border)
-            if cell_px > 4:
-                img[fy, fx + 1:fx + cell_px - 1] = (180, 40, 40)
-                img[fy + cell_px - 1, fx + 1:fx + cell_px - 1] = (180, 40, 40)
-                img[fy + 1:fy + cell_px - 1, fx] = (180, 40, 40)
-                img[fy + 1:fy + cell_px - 1, fx + cell_px - 1] = (180, 40, 40)
+            fcy = fr * cell + cell // 2
+            fcx = fc * cell + cell // 2
+            food_r = cell // 2 - 2
+            # Outer glow
+            cv2.circle(img, (fcx, fcy), food_r + 3, (60, 15, 15), -1,
+                       lineType=cv2.LINE_AA)
+            # Main apple
+            cv2.circle(img, (fcx, fcy), food_r, (220, 40, 40), -1,
+                       lineType=cv2.LINE_AA)
+            # Highlight
+            cv2.circle(img, (fcx - food_r // 3, fcy - food_r // 3),
+                       max(2, food_r // 3), (255, 130, 130), -1,
+                       lineType=cv2.LINE_AA)
 
-        # Resize to match render_size
-        if img_size != self.render_size:
-            img = cv2.resize(img, (self.render_size, self.render_size),
-                             interpolation=cv2.INTER_NEAREST)
+        # Score overlay (top-right) showing snake length
+        score_text = f"Length: {n}"
+        font = cv2.FONT_HERSHEY_SIMPLEX
+        cv2.putText(img, score_text, (img_size - 145, 22), font, 0.55,
+                    (0, 0, 0), 3, cv2.LINE_AA)
+        cv2.putText(img, score_text, (img_size - 145, 22), font, 0.55,
+                    (100, 255, 140), 1, cv2.LINE_AA)
+
         return img
 
     def render(self, mode='rgb_array'):

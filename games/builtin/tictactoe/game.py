@@ -114,23 +114,34 @@ class TicTacToeEnv(gym.Env):
                          interpolation=cv2.INTER_NEAREST)
         return np.expand_dims(obs, axis=-1)
 
+    # High-res rendering for the dashboard
+    DISPLAY_SIZE = 480
+
     def _render_rgb(self) -> np.ndarray:
-        """Render a colorful Tic-Tac-Toe board for dashboard display.
+        """Render a polished Tic-Tac-Toe board for dashboard display.
 
-        Dark background with a grid, blue X marks and red O marks.
+        Renders at 480px. Dark background with neon-style grid lines,
+        thick glowing X marks (blue) and O marks (red-pink), with
+        a winning line highlight.
         """
-        size = self.render_size
-        cell = size // 3
+        size = self.DISPLAY_SIZE
+        cell = size // 3  # 160px per cell
         img = np.zeros((size, size, 3), dtype=np.uint8)
-        img[:] = (25, 25, 40)  # Dark background
+        img[:] = (22, 22, 38)  # Dark purple-navy background
 
-        # Draw grid lines
-        line_color = (80, 80, 120)
+        # Thick stylish grid lines with glow effect
+        line_color = (60, 60, 100)
+        glow_color = (40, 40, 70)
+        thickness = max(3, cell // 30)
         for i in range(1, 3):
-            cv2.line(img, (i * cell, 0), (i * cell, size), line_color, 2)
-            cv2.line(img, (0, i * cell), (size, i * cell), line_color, 2)
+            pos = i * cell
+            cv2.line(img, (pos, 8), (pos, size - 8), glow_color, thickness + 4)
+            cv2.line(img, (pos, 8), (pos, size - 8), line_color, thickness)
+            cv2.line(img, (8, pos), (size - 8, pos), glow_color, thickness + 4)
+            cv2.line(img, (8, pos), (size - 8, pos), line_color, thickness)
 
-        pad = max(4, cell // 6)
+        pad = cell // 5
+        stroke = max(4, cell // 18)
 
         for r in range(3):
             for c in range(3):
@@ -143,14 +154,52 @@ class TicTacToeEnv(gym.Env):
                 radius = cell // 2 - pad
 
                 if self.board[r, c] == 1:
-                    # X — two diagonal lines (blue)
-                    cv2.line(img, (x1, y1), (x2, y2), (100, 160, 255), 2)
-                    cv2.line(img, (x2, y1), (x1, y2), (100, 160, 255), 2)
+                    # X — thick neon blue diagonals with glow
+                    cv2.line(img, (x1, y1), (x2, y2), (40, 70, 130),
+                             stroke + 4, cv2.LINE_AA)
+                    cv2.line(img, (x2, y1), (x1, y2), (40, 70, 130),
+                             stroke + 4, cv2.LINE_AA)
+                    cv2.line(img, (x1, y1), (x2, y2), (100, 170, 255),
+                             stroke, cv2.LINE_AA)
+                    cv2.line(img, (x2, y1), (x1, y2), (100, 170, 255),
+                             stroke, cv2.LINE_AA)
                 elif self.board[r, c] == 2:
-                    # O — circle (red)
-                    cv2.circle(img, (cx, cy), radius, (255, 80, 80), 2)
+                    # O — thick neon red-pink circle with glow
+                    cv2.circle(img, (cx, cy), radius, (100, 30, 30),
+                               stroke + 4, cv2.LINE_AA)
+                    cv2.circle(img, (cx, cy), radius, (255, 85, 85),
+                               stroke, cv2.LINE_AA)
+
+        # Draw winning line if there's a winner
+        winning_line = self._get_winning_line()
+        if winning_line:
+            (r1, c1), (r2, c2) = winning_line
+            p1 = (c1 * cell + cell // 2, r1 * cell + cell // 2)
+            p2 = (c2 * cell + cell // 2, r2 * cell + cell // 2)
+            color = (100, 170, 255) if self._winner == 1 else (255, 85, 85)
+            cv2.line(img, p1, p2, (255, 255, 255), stroke + 6, cv2.LINE_AA)
+            cv2.line(img, p1, p2, color, stroke + 2, cv2.LINE_AA)
 
         return img
+
+    def _get_winning_line(self):
+        """Return ((r1,c1),(r2,c2)) of the winning line, or None."""
+        for player in (1, 2):
+            b = self.board
+            # Rows
+            for r in range(3):
+                if all(b[r, c] == player for c in range(3)):
+                    return ((r, 0), (r, 2))
+            # Columns
+            for c in range(3):
+                if all(b[r, c] == player for r in range(3)):
+                    return ((0, c), (2, c))
+            # Diagonals
+            if all(b[i, i] == player for i in range(3)):
+                return ((0, 0), (2, 2))
+            if all(b[i, 2 - i] == player for i in range(3)):
+                return ((0, 2), (2, 0))
+        return None
 
     def render(self, mode='rgb_array'):
         return self._render_rgb()

@@ -1,8 +1,12 @@
 """Tests for BaseGameAdapter abstract interface."""
 import pytest
 import numpy as np
-import gym
-from gym.spaces import Box, Discrete
+try:
+    import gymnasium as gym
+    from gymnasium.spaces import Box, Discrete
+except ImportError:
+    import gym
+    from gym.spaces import Box, Discrete
 
 from games.base_adapter import BaseGameAdapter
 from games.reward_config import (
