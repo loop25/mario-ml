@@ -39,7 +39,6 @@ from stable_baselines3.common.vec_env import DummyVecEnv, VecFrameStack, VecTran
 from src.algorithms.base_trainer import BaseTrainer
 from src.algorithms.device import select_device
 from src.visualization.dashboard import Dashboard
-from src.environment.mario_env import create_mario_env, create_sb3_env
 
 
 class DashboardCallback(BaseCallback):

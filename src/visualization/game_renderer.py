@@ -26,7 +26,11 @@ from typing import Optional, Tuple
 
 class GameRenderer:
     """
-    Renders NES game frames to a pygame surface region.
+    Renders game frames to a pygame surface region.
+
+    Automatically detects the game's native aspect ratio from the first
+    frame and scales to fit the panel. Works with NES games (256×240),
+    square board games (480×480), and any other resolution.
 
     Uses pre-allocated surfaces to avoid per-frame memory allocation,
     which is the single biggest performance bottleneck in the dashboard.
@@ -53,23 +57,11 @@ class GameRenderer:
         self.bg_color = bg_color
         self.last_frame: Optional[np.ndarray] = None
 
-        # Pre-calculate the scaled size maintaining NES aspect ratio
-        # NES native resolution: 256x240 (width x height)
-        nes_aspect = 256 / 240
-        panel_aspect = width / height
-
-        if panel_aspect > nes_aspect:
-            # Panel is wider than NES aspect: fit to height
-            self._scaled_height = height - 20  # padding
-            self._scaled_width = int(self._scaled_height * nes_aspect)
-        else:
-            # Panel is taller than NES aspect: fit to width
-            self._scaled_width = width - 20  # padding
-            self._scaled_height = int(self._scaled_width / nes_aspect)
-
-        # Center the game display within the panel
-        self._x_offset = (width - self._scaled_width) // 2
-        self._y_offset = (height - self._scaled_height) // 2
+        # The frame aspect ratio is detected dynamically from the first
+        # rendered frame.  Until then, use a 1:1 placeholder so the
+        # pre-allocated surface has a reasonable size.
+        self._frame_aspect: float = 1.0  # updated on first frame
+        self._recalc_scaling(width, height)
 
         # Pre-allocate reusable surfaces to avoid per-frame allocation.
         # These are created lazily on first frame (need to know frame size).
@@ -82,13 +74,41 @@ class GameRenderer:
         # Cache for overlay fonts (avoid re-creating every frame)
         self._overlay_fonts: dict = {}
 
+    def _recalc_scaling(self, width: int, height: int) -> None:
+        """Recalculate scaled dimensions to fit panel while keeping
+        the actual frame aspect ratio (not a hardcoded NES ratio).
+
+        This is called from __init__, resize(), and render_frame() when
+        the frame aspect ratio changes (e.g. first frame arrives, or
+        a game with a different resolution starts).
+        """
+        aspect = self._frame_aspect  # width / height of game frame
+        panel_aspect = width / height
+
+        if panel_aspect > aspect:
+            # Panel is wider than frame: fit to height
+            self._scaled_height = height - 20  # padding
+            self._scaled_width = int(self._scaled_height * aspect)
+        else:
+            # Panel is taller than frame: fit to width
+            self._scaled_width = width - 20  # padding
+            self._scaled_height = int(self._scaled_width / aspect)
+
+        # Ensure minimum size (avoid zero-size surfaces)
+        self._scaled_width = max(self._scaled_width, 16)
+        self._scaled_height = max(self._scaled_height, 16)
+
+        # Center the game display within the panel
+        self._x_offset = (width - self._scaled_width) // 2
+        self._y_offset = (height - self._scaled_height) // 2
+
     def resize(self, width: int, height: int) -> None:
         """
         Resize the renderer to new panel dimensions.
 
-        Recalculates NES aspect ratio scaling and recreates the
-        pre-allocated scaled surface. Preserves last_frame so
-        the display doesn't flicker after a resize.
+        Recalculates scaling using the actual frame aspect ratio
+        and recreates the pre-allocated scaled surface. Preserves
+        last_frame so the display doesn't flicker after a resize.
 
         Args:
             width: New panel width in pixels.
@@ -97,24 +117,7 @@ class GameRenderer:
         self.width = width
         self.height = height
 
-        # Recalculate scaled size maintaining NES aspect ratio
-        nes_aspect = 256 / 240
-        panel_aspect = width / height
-
-        if panel_aspect > nes_aspect:
-            self._scaled_height = height - 20
-            self._scaled_width = int(self._scaled_height * nes_aspect)
-        else:
-            self._scaled_width = width - 20
-            self._scaled_height = int(self._scaled_width / nes_aspect)
-
-        # Ensure minimum size (avoid zero-size surfaces)
-        self._scaled_width = max(self._scaled_width, 16)
-        self._scaled_height = max(self._scaled_height, 16)
-
-        # Recenter
-        self._x_offset = (width - self._scaled_width) // 2
-        self._y_offset = (height - self._scaled_height) // 2
+        self._recalc_scaling(width, height)
 
         # Recreate scaled surface at new dimensions
         self._scaled_surface = pygame.Surface(
@@ -182,12 +185,22 @@ class GameRenderer:
             else:
                 frame = frame.astype(np.uint8)
 
+        # Detect the actual frame aspect ratio and recalculate scaling
+        # if it has changed (e.g. first frame, or different game started).
+        h, w = frame.shape[:2]
+        new_aspect = w / max(h, 1)
+        if abs(new_aspect - self._frame_aspect) > 0.01:
+            self._frame_aspect = new_aspect
+            self._recalc_scaling(self.width, self.height)
+            self._scaled_surface = pygame.Surface(
+                (self._scaled_width, self._scaled_height)
+            )
+
         # Draw background for the panel area
         panel_rect = pygame.Rect(panel_x, panel_y, self.width, self.height)
         pygame.draw.rect(screen, self.bg_color, panel_rect)
 
         try:
-            h, w = frame.shape[:2]
             frame_size = (w, h)
 
             # Create or resize the raw surface only when frame dimensions change.

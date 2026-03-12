@@ -1552,9 +1552,10 @@ class MarioLauncher:
         # Graduated shutdown on window close
         self._set_status("Closing... saving model", ACCENT_ORANGE)
 
-        # Send CTRL_C_EVENT
+        # Send CTRL_BREAK_EVENT (not CTRL_C_EVENT — that is disabled
+        # for processes created with CREATE_NEW_PROCESS_GROUP)
         try:
-            os.kill(self.process.pid, signal.CTRL_C_EVENT)
+            os.kill(self.process.pid, signal.CTRL_BREAK_EVENT)
         except (OSError, PermissionError):
             pass
 
