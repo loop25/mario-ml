@@ -36,6 +36,7 @@ from typing import Dict, Any, Optional
 
 from src.algorithms.base_trainer import BaseTrainer
 from src.algorithms.device import select_device
+from src.algorithms.frame_utils import capture_display_frame
 from src.algorithms.dqn.dqn_network import DQNNetwork
 from src.algorithms.dqn.replay_buffer import ReplayBuffer
 from src.visualization.dashboard import Dashboard
@@ -375,11 +376,8 @@ class DQNTrainer(BaseTrainer):
                 max_distance = max(max_distance, x_pos)
                 obs = next_obs_processed
 
-                # Capture the raw NES frame (240x256 RGB) for visualization
-                try:
-                    last_frame = self.env.unwrapped.screen
-                except AttributeError:
-                    last_frame = next_obs
+                # Capture display-quality frame for visualization
+                last_frame = capture_display_frame(self.env, fallback_obs=next_obs)
 
                 # Show live gameplay every 4 steps
                 if self.visualizer and step % 4 == 0:

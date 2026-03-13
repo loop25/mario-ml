@@ -38,6 +38,7 @@ from stable_baselines3.common.vec_env import DummyVecEnv, VecFrameStack, VecTran
 
 from src.algorithms.base_trainer import BaseTrainer
 from src.algorithms.device import select_device
+from src.algorithms.frame_utils import capture_display_frame, capture_display_frame_from_vec_env
 from src.visualization.dashboard import Dashboard
 
 
@@ -149,23 +150,15 @@ class DashboardCallback(BaseCallback):
 
         if self.dashboard and self.num_timesteps % display_interval == 0:
             if num_envs > 1:
-                # Multi-env: grab display frames from each env.
+                # Multi-env: grab display frames from each env for grid.
                 self._latest_frames = []
                 try:
                     vec_env = self.trainer.vec_env
                     dummy_env = vec_env.venv if hasattr(vec_env, 'venv') else vec_env
                     for i in range(min(num_envs, len(dummy_env.envs))):
-                        try:
-                            # Try NES screen first, then render() for built-in games
-                            frame = dummy_env.envs[i].unwrapped.screen.copy()
+                        frame = capture_display_frame(dummy_env.envs[i])
+                        if frame is not None:
                             self._latest_frames.append(frame)
-                        except (AttributeError, Exception):
-                            try:
-                                frame = dummy_env.envs[i].render(mode='rgb_array')
-                                if frame is not None:
-                                    self._latest_frames.append(frame)
-                            except Exception:
-                                pass
                 except (AttributeError, Exception):
                     pass
 
@@ -176,26 +169,13 @@ class DashboardCallback(BaseCallback):
                     ):
                         return False
             else:
-                # Single env: grab display frame
-                try:
-                    # NES screen (if available)
-                    self._latest_frame = self.trainer.env.unwrapped.screen
-                except AttributeError:
-                    # Built-in games: use render() for colorful display
-                    try:
-                        frame = self.trainer.env.render(mode='rgb_array')
-                        if frame is not None:
-                            self._latest_frame = frame
-                    except (TypeError, Exception):
-                        # Fallback: raw observation
-                        if self.locals.get('new_obs') is not None:
-                            obs = self.locals['new_obs']
-                            if len(obs) > 0:
-                                frame = obs[0]
-                                if frame.ndim == 3:
-                                    self._latest_frame = frame[-1] if frame.shape[0] <= 4 else frame
-                                else:
-                                    self._latest_frame = frame
+                # Single env: grab display frame.
+                frame = capture_display_frame_from_vec_env(
+                    self.trainer.vec_env,
+                    fallback_obs=self._latest_frame,
+                )
+                if frame is not None:
+                    self._latest_frame = frame
 
                 if self._latest_frame is not None:
                     if not self.trainer.update_visualization(

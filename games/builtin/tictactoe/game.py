@@ -41,14 +41,17 @@ class TicTacToeEnv(gym.Env):
         self.board = np.zeros((3, 3), dtype=np.int8)
         self._moves_played = 0
         self._winner = 0
+        self._last_action = None
 
     def reset(self):
         self.board = np.zeros((3, 3), dtype=np.int8)
         self._moves_played = 0
         self._winner = 0
+        self._last_action = None
         return self._render_obs()
 
     def step(self, action):
+        self._last_action = action
         row, col = divmod(action, 3)
 
         # Invalid move (already occupied or out of range)
@@ -118,30 +121,80 @@ class TicTacToeEnv(gym.Env):
     DISPLAY_SIZE = 480
 
     def _render_rgb(self) -> np.ndarray:
-        """Render a polished Tic-Tac-Toe board for dashboard display.
+        """Render a visually rich chalkboard-style Tic-Tac-Toe board.
 
-        Renders at 480px. Dark background with neon-style grid lines,
-        thick glowing X marks (blue) and O marks (red-pink), with
-        a winning line highlight.
+        Renders at 480px with:
+        - Dark textured chalkboard background with grain noise
+        - Hand-drawn chalk grid lines (multi-stroke imperfections)
+        - Chalk-blue X marks with glow and slight hand-drawn offsets
+        - Warm coral O marks with glow and thickness variation
+        - Golden animated-feel winning line
+        - Score/status overlay bar at the bottom
+        - Chalk dust particle specks
+        - Last-played cell highlight
         """
         size = self.DISPLAY_SIZE
         cell = size // 3  # 160px per cell
-        img = np.zeros((size, size, 3), dtype=np.uint8)
-        img[:] = (22, 22, 38)  # Dark purple-navy background
 
-        # Thick stylish grid lines with glow effect
-        line_color = (60, 60, 100)
-        glow_color = (40, 40, 70)
-        thickness = max(3, cell // 30)
+        # --- Seeded RNG for deterministic "hand-drawn" jitter per board state ---
+        board_seed = int(self.board.tobytes().hex(), 16) % (2**31)
+        rng = np.random.RandomState(board_seed)
+
+        # --- 1. Chalkboard background with noise/grain ---
+        img = np.zeros((size, size, 3), dtype=np.uint8)
+        # Base dark slate-green chalkboard color
+        img[:, :, 0] = 38   # B
+        img[:, :, 1] = 42   # G
+        img[:, :, 2] = 35   # R
+        # Add subtle grain noise
+        noise = rng.randint(-12, 13, (size, size), dtype=np.int16)
+        for ch in range(3):
+            plane = img[:, :, ch].astype(np.int16) + noise
+            img[:, :, ch] = np.clip(plane, 0, 255).astype(np.uint8)
+
+        # --- 2. Last-played cell highlight ---
+        if self._last_action is not None and 0 <= self._last_action < 9:
+            lr, lc = divmod(self._last_action, 3)
+            overlay = img.copy()
+            x1h = lc * cell
+            y1h = lr * cell
+            x2h = x1h + cell
+            y2h = y1h + cell
+            cv2.rectangle(overlay, (x1h, y1h), (x2h, y2h),
+                          (70, 85, 60), -1)  # subtle greenish highlight
+            cv2.addWeighted(overlay, 0.35, img, 0.65, 0, img)
+
+        # --- 3. Hand-drawn chalk grid lines ---
+        chalk_white = (190, 190, 180)  # slightly warm white
+        chalk_dim = (130, 130, 120)
+        margin = 12
         for i in range(1, 3):
             pos = i * cell
-            cv2.line(img, (pos, 8), (pos, size - 8), glow_color, thickness + 4)
-            cv2.line(img, (pos, 8), (pos, size - 8), line_color, thickness)
-            cv2.line(img, (8, pos), (size - 8, pos), glow_color, thickness + 4)
-            cv2.line(img, (8, pos), (size - 8, pos), line_color, thickness)
+            # Draw multiple offset strokes to simulate hand-drawn look
+            for offset in [-1, 0, 1]:
+                # Vertical lines
+                jx1 = rng.randint(-2, 3)
+                jx2 = rng.randint(-2, 3)
+                cv2.line(img,
+                         (pos + offset + jx1, margin),
+                         (pos + offset + jx2, size - margin),
+                         chalk_dim, 2, cv2.LINE_AA)
+                # Horizontal lines
+                jy1 = rng.randint(-2, 3)
+                jy2 = rng.randint(-2, 3)
+                cv2.line(img,
+                         (margin, pos + offset + jy1),
+                         (size - margin, pos + offset + jy2),
+                         chalk_dim, 2, cv2.LINE_AA)
+            # Core line on top (thicker, brighter)
+            cv2.line(img, (pos, margin), (pos, size - margin),
+                     chalk_white, 3, cv2.LINE_AA)
+            cv2.line(img, (margin, pos), (size - margin, pos),
+                     chalk_white, 3, cv2.LINE_AA)
 
+        # --- 4. Draw X and O marks ---
         pad = cell // 5
-        stroke = max(4, cell // 18)
+        stroke = max(5, cell // 16)
 
         for r in range(3):
             for c in range(3):
@@ -154,31 +207,114 @@ class TicTacToeEnv(gym.Env):
                 radius = cell // 2 - pad
 
                 if self.board[r, c] == 1:
-                    # X — thick neon blue diagonals with glow
-                    cv2.line(img, (x1, y1), (x2, y2), (30, 60, 140),
-                             stroke + 6, cv2.LINE_AA)
-                    cv2.line(img, (x2, y1), (x1, y2), (30, 60, 140),
-                             stroke + 6, cv2.LINE_AA)
-                    cv2.line(img, (x1, y1), (x2, y2), (80, 180, 255),
+                    # --- X mark: chalk-blue with glow, hand-drawn jitter ---
+                    jitter = lambda: int(rng.randint(-3, 4))
+                    p1a = (x1 + jitter(), y1 + jitter())
+                    p1b = (x2 + jitter(), y2 + jitter())
+                    p2a = (x2 + jitter(), y1 + jitter())
+                    p2b = (x1 + jitter(), y2 + jitter())
+
+                    # Outer glow (diffuse blue)
+                    cv2.line(img, p1a, p1b, (80, 50, 30),
+                             stroke + 8, cv2.LINE_AA)
+                    cv2.line(img, p2a, p2b, (80, 50, 30),
+                             stroke + 8, cv2.LINE_AA)
+                    # Mid glow
+                    cv2.line(img, p1a, p1b, (170, 130, 60),
+                             stroke + 3, cv2.LINE_AA)
+                    cv2.line(img, p2a, p2b, (170, 130, 60),
+                             stroke + 3, cv2.LINE_AA)
+                    # Core bright chalk-blue stroke
+                    cv2.line(img, p1a, p1b, (230, 200, 120),
                              stroke, cv2.LINE_AA)
-                    cv2.line(img, (x2, y1), (x1, y2), (80, 180, 255),
+                    cv2.line(img, p2a, p2b, (230, 200, 120),
                              stroke, cv2.LINE_AA)
+
                 elif self.board[r, c] == 2:
-                    # O — thick neon red-pink circle with glow
-                    cv2.circle(img, (cx, cy), radius, (120, 25, 40),
-                               stroke + 6, cv2.LINE_AA)
-                    cv2.circle(img, (cx, cy), radius, (255, 65, 95),
+                    # --- O mark: warm coral/red chalk with glow ---
+                    jitter_r = int(rng.randint(-2, 3))
+                    ocx = cx + jitter_r
+                    ocy = cy + int(rng.randint(-2, 3))
+                    orad = radius + int(rng.randint(-2, 3))
+
+                    # Outer glow
+                    cv2.circle(img, (ocx, ocy), orad, (60, 45, 120),
+                               stroke + 8, cv2.LINE_AA)
+                    # Mid glow
+                    cv2.circle(img, (ocx, ocy), orad, (90, 80, 200),
+                               stroke + 3, cv2.LINE_AA)
+                    # Core bright coral stroke
+                    cv2.circle(img, (ocx, ocy), orad, (120, 120, 245),
                                stroke, cv2.LINE_AA)
 
-        # Draw winning line if there's a winner
+        # --- 5. Winning line: dramatic golden glow ---
         winning_line = self._get_winning_line()
         if winning_line:
             (r1, c1), (r2, c2) = winning_line
             p1 = (c1 * cell + cell // 2, r1 * cell + cell // 2)
             p2 = (c2 * cell + cell // 2, r2 * cell + cell // 2)
-            color = (80, 180, 255) if self._winner == 1 else (255, 65, 95)
-            cv2.line(img, p1, p2, (255, 255, 255), stroke + 6, cv2.LINE_AA)
-            cv2.line(img, p1, p2, color, stroke + 2, cv2.LINE_AA)
+            # Wide golden glow (outermost)
+            cv2.line(img, p1, p2, (30, 170, 220), stroke + 16, cv2.LINE_AA)
+            # Mid glow
+            cv2.line(img, p1, p2, (55, 210, 250), stroke + 8, cv2.LINE_AA)
+            # Bright core
+            cv2.line(img, p1, p2, (100, 240, 255), stroke + 2, cv2.LINE_AA)
+            # Hot white center
+            cv2.line(img, p1, p2, (180, 255, 255), stroke - 2, cv2.LINE_AA)
+
+        # --- 6. Chalk dust particles ---
+        for _ in range(25):
+            dx = rng.randint(0, size)
+            dy = rng.randint(0, size)
+            brightness = int(rng.randint(55, 100))
+            radius_d = int(rng.randint(1, 3))
+            cv2.circle(img, (int(dx), int(dy)), radius_d,
+                       (brightness, brightness, brightness - 10), -1,
+                       cv2.LINE_AA)
+
+        # --- 7. Score/status overlay bar at bottom ---
+        bar_h = 38
+        bar_y = size - bar_h
+        overlay = img.copy()
+        cv2.rectangle(overlay, (0, bar_y), (size, size), (0, 0, 0), -1)
+        cv2.addWeighted(overlay, 0.55, img, 0.45, 0, img)
+
+        # Count pieces
+        x_count = int(np.sum(self.board == 1))
+        o_count = int(np.sum(self.board == 2))
+
+        # Status text
+        if self._winner == 1:
+            status = "X WINS!"
+        elif self._winner == 2:
+            status = "O WINS!"
+        elif self._moves_played >= 9:
+            status = "DRAW"
+        else:
+            status = "X's turn" if self._moves_played % 2 == 0 else "O's turn"
+
+        # "X vs O" with scores on left side
+        score_text = f"X:{x_count}  vs  O:{o_count}"
+        font = cv2.FONT_HERSHEY_SIMPLEX
+        font_scale = 0.50
+        thickness_t = 1
+
+        # Score on the left
+        cv2.putText(img, score_text, (10, bar_y + 25),
+                    font, font_scale, (230, 200, 120), thickness_t,
+                    cv2.LINE_AA)
+
+        # Status on the right
+        (tw, _), _ = cv2.getTextSize(status, font, font_scale, thickness_t)
+        cv2.putText(img, status, (size - tw - 10, bar_y + 25),
+                    font, font_scale, (120, 220, 250), thickness_t,
+                    cv2.LINE_AA)
+
+        # Move counter in center
+        move_text = f"Move {self._moves_played}/9"
+        (mw, _), _ = cv2.getTextSize(move_text, font, 0.40, 1)
+        cv2.putText(img, move_text, ((size - mw) // 2, bar_y + 25),
+                    font, 0.40, (160, 160, 150), 1, cv2.LINE_AA)
 
         return img
 

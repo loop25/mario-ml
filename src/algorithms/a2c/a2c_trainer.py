@@ -26,6 +26,7 @@ from stable_baselines3.common.vec_env import DummyVecEnv, VecTransposeImage
 
 from src.algorithms.base_trainer import BaseTrainer
 from src.algorithms.device import select_device
+from src.algorithms.frame_utils import capture_display_frame_from_vec_env
 from src.visualization.dashboard import Dashboard
 
 
@@ -49,23 +50,9 @@ class A2CDashboardCallback(BaseCallback):
         # --- Live gameplay frame capture ---
         display_interval = 16
         if self.dashboard and self.num_timesteps % display_interval == 0:
-            try:
-                vec_env = self.trainer.vec_env
-                if vec_env is not None:
-                    dummy_env = vec_env.venv if hasattr(vec_env, 'venv') else vec_env
-                    try:
-                        # NES screen (if available)
-                        self._latest_frame = dummy_env.envs[0].unwrapped.screen.copy()
-                    except (AttributeError, Exception):
-                        try:
-                            # Built-in games: render() for colorful display
-                            frame = dummy_env.envs[0].render(mode='rgb_array')
-                            if frame is not None:
-                                self._latest_frame = frame
-                        except Exception:
-                            pass
-            except (AttributeError, Exception):
-                pass
+            frame = capture_display_frame_from_vec_env(self.trainer.vec_env)
+            if frame is not None:
+                self._latest_frame = frame
 
             if self._latest_frame is not None:
                 if not self.trainer.update_visualization(

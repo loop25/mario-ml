@@ -61,12 +61,16 @@ class ChessEnv(gym.Env):
         self._winner = 0
         self._moves_played = 0
         self._last_move = None  # Track last move for highlight
+        self._captured_white = []  # White pieces captured by black
+        self._captured_black = []  # Black pieces captured by white
 
     def reset(self):
         self.board = chess.Board()
         self._winner = 0
         self._moves_played = 0
         self._last_move = None
+        self._captured_white = []
+        self._captured_black = []
         return self._render_obs()
 
     def step(self, action):
@@ -85,6 +89,14 @@ class ChessEnv(gym.Env):
         if move not in self.board.legal_moves:
             self._winner = 2
             return self._render_obs(), -1.0, True, self._info()
+
+        # Track captured piece before pushing
+        captured = self.board.piece_at(move.to_square)
+        if captured is not None:
+            if captured.color == chess.WHITE:
+                self._captured_white.append(captured.piece_type)
+            else:
+                self._captured_black.append(captured.piece_type)
 
         # Execute agent move (White)
         self._last_move = move
@@ -108,6 +120,15 @@ class ChessEnv(gym.Env):
             return self._render_obs(), 1.0, True, self._info()
 
         opp_move = random.choice(opp_moves)
+
+        # Track captured piece before pushing
+        opp_captured = self.board.piece_at(opp_move.to_square)
+        if opp_captured is not None:
+            if opp_captured.color == chess.WHITE:
+                self._captured_white.append(opp_captured.piece_type)
+            else:
+                self._captured_black.append(opp_captured.piece_type)
+
         self._last_move = opp_move
         self.board.push(opp_move)
         self._moves_played += 1
@@ -183,30 +204,73 @@ class ChessEnv(gym.Env):
     # High-res rendering for the dashboard (independent of ML obs size)
     DISPLAY_SIZE = 480
 
-    # Board margin for coordinate labels
-    _MARGIN = 24
+    # Board frame and margin sizes
+    _FRAME = 16   # Thick wood frame around the board
+    _MARGIN = 24  # Coordinate label area (inside the frame)
+
+    # Piece-type symbols for the status bar (ASCII fallback labels)
+    _PIECE_LABELS = {
+        chess.PAWN: 'P', chess.KNIGHT: 'N', chess.BISHOP: 'B',
+        chess.ROOK: 'R', chess.QUEEN: 'Q', chess.KING: 'K',
+    }
+    # Piece ordering for material display (most valuable first)
+    _PIECE_ORDER = [chess.QUEEN, chess.ROOK, chess.BISHOP,
+                    chess.KNIGHT, chess.PAWN]
 
     def _render_rgb(self) -> np.ndarray:
         """Render a polished chess board for dashboard/stream display.
 
-        Warm wooden board with coordinate labels, last-move highlights,
-        check indicator, and clean geometric piece shapes with anti-aliasing.
+        Features: dark wood frame, textured warm board, coordinate labels,
+        last-move highlights, check indicator, geometric pieces with drop
+        shadows, captured-pieces tray, and a full-width status banner.
         """
         size = self.DISPLAY_SIZE
+        frame = self._FRAME
         margin = self._MARGIN
-        board_px = size - margin  # Board area (excluding margin)
+        # Board area sits inside frame + label margin
+        inner = size - 2 * frame  # Area inside the outer frame
+        board_px = inner - margin  # Board squares area (labels on left/bottom)
         cell = board_px // 8
         board_px = cell * 8  # Snap to exact multiple
-        total = board_px + margin
-        img = np.zeros((total, total, 3), dtype=np.uint8)
-        img[:] = (30, 25, 20)  # Dark background outside board
 
-        # Warm wooden square colors
-        LIGHT_SQ = (222, 196, 160)
-        DARK_SQ = (160, 120, 80)
-        HIGHLIGHT_LIGHT = (240, 220, 130)  # Yellow tint for last move
-        HIGHLIGHT_DARK = (200, 180, 80)
-        CHECK_TINT = (180, 80, 80)  # Red tint for check
+        # Canvas is the full DISPLAY_SIZE
+        img = np.zeros((size, size, 3), dtype=np.uint8)
+        img[:] = (30, 25, 20)
+
+        # --- Dark wood frame ---
+        # Outer frame fill: polished dark wood gradient look
+        frame_color_outer = (45, 32, 22)
+        frame_color_inner = (65, 48, 35)
+        frame_highlight = (85, 65, 48)
+
+        # Fill outer frame region
+        img[0:size, 0:size] = frame_color_outer
+        # Inner bevel (lighter strip)
+        cv2.rectangle(img, (frame - 3, frame - 3),
+                      (size - frame + 2, size - frame + 2),
+                      frame_highlight, 2, cv2.LINE_AA)
+        cv2.rectangle(img, (frame - 1, frame - 1),
+                      (size - frame, size - frame),
+                      frame_color_inner, 1, cv2.LINE_AA)
+        # Outer edge highlight (top-left light, bottom-right dark)
+        cv2.line(img, (0, 0), (size - 1, 0), (75, 58, 42), 1)
+        cv2.line(img, (0, 0), (0, size - 1), (75, 58, 42), 1)
+        cv2.line(img, (size - 1, 0), (size - 1, size - 1), (25, 18, 12), 1)
+        cv2.line(img, (0, size - 1), (size - 1, size - 1), (25, 18, 12), 1)
+
+        # Clear the inner area (labels + board) to dark bg
+        img[frame:size - frame, frame:size - frame] = (30, 25, 20)
+
+        # Board origin: labels on left and bottom inside the inner area
+        ox = frame + margin  # Board squares start after frame + label margin
+        oy = frame           # Board squares start at top of inner area
+
+        # --- Warm wooden square colors ---
+        LIGHT_SQ = np.array([222, 196, 160], dtype=np.int16)
+        DARK_SQ = np.array([160, 120, 80], dtype=np.int16)
+        HIGHLIGHT_LIGHT = np.array([240, 220, 130], dtype=np.int16)
+        HIGHLIGHT_DARK = np.array([200, 180, 80], dtype=np.int16)
+        CHECK_TINT = (180, 80, 80)
 
         # Determine last-move squares and check square
         last_from = last_to = -1
@@ -216,14 +280,11 @@ class ChessEnv(gym.Env):
 
         check_sq = -1
         if self.board.is_check():
-            # Find the king of the side to move (they are in check)
             king_sq = self.board.king(self.board.turn)
             if king_sq is not None:
                 check_sq = king_sq
 
-        ox, oy = margin, 0  # Board origin (offset by left margin)
-
-        # Draw board squares with highlights
+        # --- Draw board squares with per-square texture variation ---
         for row in range(8):
             for col in range(8):
                 sq = chess.square(col, 7 - row)
@@ -236,14 +297,20 @@ class ChessEnv(gym.Env):
                 # Choose base color
                 if sq == check_sq:
                     color = CHECK_TINT
+                    img[y1:y2, x1:x2] = color
+                    continue
                 elif sq == last_from or sq == last_to:
-                    color = HIGHLIGHT_LIGHT if is_light else HIGHLIGHT_DARK
+                    base = HIGHLIGHT_LIGHT if is_light else HIGHLIGHT_DARK
                 else:
-                    color = LIGHT_SQ if is_light else DARK_SQ
+                    base = LIGHT_SQ if is_light else DARK_SQ
 
+                # Deterministic per-square texture variation
+                variation = ((row * 7 + col * 13) % 8 - 4)
+                color = tuple(int(max(0, min(255, int(c) + variation)))
+                              for c in base)
                 img[y1:y2, x1:x2] = color
 
-        # Draw pieces
+        # --- Draw pieces with drop shadows ---
         for sq in range(64):
             piece = self.board.piece_at(sq)
             if piece is None:
@@ -254,90 +321,157 @@ class ChessEnv(gym.Env):
             cy = oy + row * cell + cell // 2
             self._draw_piece(img, piece, cx, cy, cell)
 
-        # Coordinate labels
+        # --- Coordinate labels ---
         font = cv2.FONT_HERSHEY_SIMPLEX
         label_scale = 0.38
         label_color = (180, 165, 140)
         label_thick = 1
+        banner_h = 22  # Status banner height (used for label positioning)
         files = 'abcdefgh'
+        label_row_y = oy + 8 * cell + banner_h + 4  # Below the status banner
         for col in range(8):
-            # File labels along bottom
             lx = ox + col * cell + cell // 2 - 4
-            ly = oy + 8 * cell + margin - 6
-            cv2.putText(img, files[col], (lx, ly), font, label_scale,
-                        label_color, label_thick, cv2.LINE_AA)
+            cv2.putText(img, files[col], (lx, label_row_y + 8), font,
+                        label_scale, label_color, label_thick, cv2.LINE_AA)
         for row in range(8):
-            # Rank labels along left side
             rank = str(8 - row)
-            lx = 5
+            lx = frame + 5
             ly = oy + row * cell + cell // 2 + 4
             cv2.putText(img, rank, (lx, ly), font, label_scale,
                         label_color, label_thick, cv2.LINE_AA)
 
-        # Score / status overlay (top-right, inside board area)
-        status = f"Move {self._moves_played}"
-        if self.board.is_check():
-            status += " CHECK"
-        elif self.board.is_checkmate():
-            status += " MATE"
+        # --- Captured pieces tray (in the frame edges) ---
+        cap_font = cv2.FONT_HERSHEY_SIMPLEX
+        cap_scale = 0.30
+
+        # Captured white pieces shown in top frame strip
+        cap_x = ox
+        cap_y_top = 11  # Vertically centered in top frame
+        for pt in sorted(self._captured_white,
+                         key=lambda t: self._PIECE_ORDER.index(t)
+                         if t in self._PIECE_ORDER else 99):
+            label = self._PIECE_LABELS.get(pt, '?')
+            cv2.putText(img, label, (cap_x, cap_y_top), cap_font,
+                        cap_scale, (200, 190, 170), 1, cv2.LINE_AA)
+            cap_x += 12
+
+        # Captured black pieces shown in right frame strip (vertical)
+        cap_ry = oy + 4
+        cap_rx = size - frame + 3  # In the right frame strip
+        for pt in sorted(self._captured_black,
+                         key=lambda t: self._PIECE_ORDER.index(t)
+                         if t in self._PIECE_ORDER else 99):
+            label = self._PIECE_LABELS.get(pt, '?')
+            cv2.putText(img, label, (cap_rx, cap_ry + 8), cap_font,
+                        cap_scale, (120, 110, 100), 1, cv2.LINE_AA)
+            cap_ry += 12
+
+        # --- Full-width status banner at the bottom of the board area ---
+        banner_y = oy + 8 * cell  # Just below the board squares
+        banner_x1 = ox
+        banner_x2 = ox + board_px
+
+        # Semi-transparent dark banner (blend with background)
+        overlay = img[banner_y:banner_y + banner_h,
+                      banner_x1:banner_x2].astype(np.int16)
+        overlay = np.clip(overlay * 4 // 10, 0, 255).astype(np.uint8)
+        img[banner_y:banner_y + banner_h, banner_x1:banner_x2] = overlay
+
+        # Side-to-move indicator dot
+        dot_cx = banner_x1 + 8
+        dot_cy = banner_y + banner_h // 2
+        dot_color = (230, 225, 210) if self.board.turn == chess.WHITE \
+            else (50, 45, 40)
+        cv2.circle(img, (dot_cx, dot_cy), 5, dot_color, -1, cv2.LINE_AA)
+        cv2.circle(img, (dot_cx, dot_cy), 5, (140, 130, 110), 1, cv2.LINE_AA)
+
+        # Move number
+        move_num = self._moves_played // 2 + 1
+        status_parts = [f"#{move_num}"]
+
+        # Check / mate / draw status
+        if self.board.is_checkmate():
+            status_parts.append("CHECKMATE")
         elif self.board.is_stalemate():
-            status += " DRAW"
-        tw = cv2.getTextSize(status, font, 0.45, 1)[0][0]
-        sx = total - tw - 10
-        cv2.rectangle(img, (sx - 4, 1), (total - 2, 20),
-                      (30, 25, 20), -1)
-        cv2.putText(img, status, (sx, 15), font, 0.45,
-                    (220, 200, 160), 1, cv2.LINE_AA)
+            status_parts.append("STALEMATE")
+        elif self.board.is_check():
+            status_parts.append("CHECK")
 
-        # Material count overlay (top-left, inside board area)
-        w_count = sum(1 for s in range(64)
-                      if self.board.piece_at(s) is not None
-                      and self.board.piece_at(s).color == chess.WHITE)
-        b_count = sum(1 for s in range(64)
-                      if self.board.piece_at(s) is not None
-                      and self.board.piece_at(s).color == chess.BLACK)
-        mat_text = f"W:{w_count} B:{b_count}"
-        cv2.rectangle(img, (margin, 1), (margin + 95, 20),
-                      (30, 25, 20), -1)
-        cv2.putText(img, mat_text, (margin + 4, 15), font, 0.45,
-                    (220, 200, 160), 1, cv2.LINE_AA)
+        status_text = " ".join(status_parts)
+        cv2.putText(img, status_text, (dot_cx + 10, banner_y + 15),
+                    font, 0.38, (220, 200, 160), 1, cv2.LINE_AA)
 
-        # Resize to exact DISPLAY_SIZE if needed
-        if total != size:
+        # Material balance on the right side of the banner
+        mat_parts = []
+        for pt in self._PIECE_ORDER:
+            w = sum(1 for s in range(64)
+                    if self.board.piece_at(s) is not None
+                    and self.board.piece_at(s).color == chess.WHITE
+                    and self.board.piece_at(s).piece_type == pt)
+            b = sum(1 for s in range(64)
+                    if self.board.piece_at(s) is not None
+                    and self.board.piece_at(s).color == chess.BLACK
+                    and self.board.piece_at(s).piece_type == pt)
+            label = self._PIECE_LABELS[pt]
+            if w > 0 or b > 0:
+                mat_parts.append(f"{label}{w}/{b}")
+        mat_text = " ".join(mat_parts)
+        tw = cv2.getTextSize(mat_text, font, 0.32, 1)[0][0]
+        cv2.putText(img, mat_text, (banner_x2 - tw - 4, banner_y + 15),
+                    font, 0.32, (190, 175, 150), 1, cv2.LINE_AA)
+
+        # Resize to exact DISPLAY_SIZE if needed (should already be 480)
+        h, w = img.shape[:2]
+        if h != size or w != size:
             img = cv2.resize(img, (size, size), interpolation=cv2.INTER_AREA)
 
         return img
 
     def _draw_piece(self, img, piece, cx, cy, cell):
-        """Draw a single chess piece using geometric shapes."""
+        """Draw a single chess piece with a drop shadow underneath."""
         is_white = piece.color == chess.WHITE
-        # Color palette per spec
         if is_white:
-            fill = (240, 235, 220)     # Ivory fill
-            dark = (180, 170, 150)     # Shadow
-            outline = (60, 50, 40)     # Dark outline
+            fill = (240, 235, 220)
+            dark = (180, 170, 150)
+            outline = (60, 50, 40)
             highlight = (255, 252, 245)
         else:
-            fill = (50, 45, 40)        # Dark charcoal fill
-            dark = (30, 28, 26)        # Shadow
-            outline = (100, 90, 80)    # Lighter outline
+            fill = (50, 45, 40)
+            dark = (30, 28, 26)
+            outline = (100, 90, 80)
             highlight = (80, 75, 70)
 
-        r = cell // 2 - 4  # Piece radius fits within cell
-
+        r = cell // 2 - 4
         pt = piece.piece_type
 
+        # Shadow color (very dark, semi-visible)
+        shadow = (20, 18, 15)
+        shadow_dx, shadow_dy = 2, 2
+
+        # Draw shadow first (same shape offset by 2px)
         if pt == chess.PAWN:
+            self._draw_pawn(img, cx + shadow_dx, cy + shadow_dy, r,
+                            shadow, shadow, shadow, shadow)
             self._draw_pawn(img, cx, cy, r, fill, dark, outline, highlight)
         elif pt == chess.ROOK:
+            self._draw_rook(img, cx + shadow_dx, cy + shadow_dy, r,
+                            shadow, shadow, shadow, shadow)
             self._draw_rook(img, cx, cy, r, fill, dark, outline, highlight)
         elif pt == chess.KNIGHT:
+            self._draw_knight(img, cx + shadow_dx, cy + shadow_dy, r,
+                              shadow, shadow, shadow, shadow)
             self._draw_knight(img, cx, cy, r, fill, dark, outline, highlight)
         elif pt == chess.BISHOP:
+            self._draw_bishop(img, cx + shadow_dx, cy + shadow_dy, r,
+                              shadow, shadow, shadow, shadow)
             self._draw_bishop(img, cx, cy, r, fill, dark, outline, highlight)
         elif pt == chess.QUEEN:
+            self._draw_queen(img, cx + shadow_dx, cy + shadow_dy, r,
+                             shadow, shadow, shadow, shadow)
             self._draw_queen(img, cx, cy, r, fill, dark, outline, highlight)
         elif pt == chess.KING:
+            self._draw_king(img, cx + shadow_dx, cy + shadow_dy, r,
+                            shadow, shadow, shadow, shadow)
             self._draw_king(img, cx, cy, r, fill, dark, outline, highlight)
 
     def _draw_base(self, img, cx, cy, r, fill, dark, outline):

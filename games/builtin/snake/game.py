@@ -56,6 +56,9 @@ class SnakeEnv(gym.Env):
         self.direction = 1  # Start moving right
         self._steps_since_food = 0
         self._score = 0
+        self._trail = []       # last ~8 positions the head vacated
+        self._dead = False      # set True on collision for death flash
+        self._step_count = 0    # global tick for animation timing
 
     def reset(self):
         # Place snake in center with 3 segments (standard Snake gameplay)
@@ -68,14 +71,24 @@ class SnakeEnv(gym.Env):
         self.direction = 1  # Right
         self._steps_since_food = 0
         self._score = 0
+        self._trail = []
+        self._dead = False
+        self._step_count = 0
         self._place_food()
         return self._render_obs()
 
     def step(self, action):
+        self._step_count += 1
+
         # Prevent 180-degree turns (can't reverse into yourself)
         opposite = {0: 2, 1: 3, 2: 0, 3: 1}
         if action != opposite.get(self.direction, -1):
             self.direction = action
+
+        # Track trail (head position before moving)
+        self._trail.append(self.snake[0])
+        if len(self._trail) > 8:
+            self._trail = self._trail[-8:]
 
         # Move head
         head_r, head_c = self.snake[0]
@@ -85,10 +98,12 @@ class SnakeEnv(gym.Env):
         # Check wall collision
         r, c = new_head
         if r < 0 or r >= self.grid_size or c < 0 or c >= self.grid_size:
+            self._dead = True
             return self._render_obs(), -1.0, True, self._info()
 
         # Check self collision
         if new_head in self.snake:
+            self._dead = True
             return self._render_obs(), -1.0, True, self._info()
 
         # Move
@@ -150,33 +165,72 @@ class SnakeEnv(gym.Env):
         return (r, g, 20)
 
     def _render_rgb(self) -> np.ndarray:
-        """Render a classic-style snake game for dashboard/stream.
+        """Render a polished, stream-quality snake game for dashboard.
 
-        High-contrast design: bright green snake on a black background
-        with visible grid lines — instantly recognizable as Snake.
-        Connected body via filled rectangles between segments.
+        Features: gradient background, checkerboard grid, snake glow,
+        pulsing food rings, trail ghost marks, gradient HUD banner,
+        and red death flash.
         """
         size = self.DISPLAY_SIZE
         cell = size // self.grid_size  # 30px per cell at 480/16
         img_size = cell * self.grid_size
         img = np.zeros((img_size, img_size, 3), dtype=np.uint8)
 
-        # Pure black background — classic snake look, high contrast
-        img[:] = (10, 10, 10)
+        # --- 1. Gradient background: dark green, lighter toward center ---
+        cx_bg = img_size / 2.0
+        cy_bg = img_size / 2.0
+        max_dist = (cx_bg ** 2 + cy_bg ** 2) ** 0.5
+        # Build row of distances from center for each pixel row
+        ys = np.arange(img_size, dtype=np.float32) - cy_bg
+        xs = np.arange(img_size, dtype=np.float32) - cx_bg
+        dist_sq = ys[:, None] ** 2 + xs[None, :] ** 2
+        dist = np.sqrt(dist_sq)
+        t = dist / max_dist  # 0 at center, 1 at corners
+        # Background: center=(14, 22, 12), edges=(6, 8, 6)
+        img[:, :, 0] = (14 - 8 * t).astype(np.uint8)   # B
+        img[:, :, 1] = (22 - 14 * t).astype(np.uint8)   # G
+        img[:, :, 2] = (12 - 6 * t).astype(np.uint8)    # R
 
-        # Visible grid lines (dark gray on black — subtle but clear)
-        for i in range(1, self.grid_size):
-            pos = i * cell
-            cv2.line(img, (pos, 0), (pos, img_size), (35, 35, 35), 1)
-            cv2.line(img, (0, pos), (img_size, pos), (35, 35, 35), 1)
+        # --- 2. Checkerboard grid (alternating dark squares) ---
+        for row in range(self.grid_size):
+            for col in range(self.grid_size):
+                if (row + col) % 2 == 0:
+                    x0 = col * cell
+                    y0 = row * cell
+                    # Slightly lighter square overlay
+                    overlay = img[y0:y0 + cell, x0:x0 + cell]
+                    img[y0:y0 + cell, x0:x0 + cell] = np.clip(
+                        overlay.astype(np.int16) + 6, 0, 255
+                    ).astype(np.uint8)
 
         n = len(self.snake)
         half = cell // 2
-        # Body thickness: nearly fills the cell for visibility
         thick = cell // 2 - 2  # half-width of the body band
 
+        # --- 5. Trail effect: faint marks on recently vacated cells ---
+        snake_set = set(self.snake)
+        for ti, pos in enumerate(self._trail):
+            if pos in snake_set:
+                continue  # don't draw trail under current body
+            tr, tc = pos
+            tcx, tcy = tc * cell + half, tr * cell + half
+            age = len(self._trail) - ti  # 1=newest, len=oldest
+            alpha = max(0.05, 0.25 - age * 0.025)
+            glow_c = (int(15 * alpha * 4), int(50 * alpha * 4),
+                      int(10 * alpha * 4))
+            cv2.circle(img, (tcx, tcy), thick - 2, glow_c, -1,
+                       cv2.LINE_AA)
+
+        # --- 3. Snake body glow (subtle bloom behind body) ---
+        for i in range(n - 1, -1, -1):
+            r, c = self.snake[i]
+            cx_s, cy_s = c * cell + half, r * cell + half
+            seg_c = self._segment_color(i, n)
+            glow_color = (seg_c[0] // 5, seg_c[1] // 5, seg_c[2] // 5)
+            cv2.circle(img, (cx_s, cy_s), thick + 4, glow_color, -1,
+                       cv2.LINE_AA)
+
         # --- Draw connected body: rects between segments + circles ---
-        # Tail-to-head order so brighter head colors draw on top.
         for i in range(n - 1, 0, -1):
             r1, c1 = self.snake[i]
             r2, c2 = self.snake[i - 1]
@@ -195,22 +249,22 @@ class SnakeEnv(gym.Env):
         # Rounded joints at every segment
         for i in range(n - 1, -1, -1):
             r, c = self.snake[i]
-            cx, cy = c * cell + half, r * cell + half
+            cx_s, cy_s = c * cell + half, r * cell + half
             color = self._segment_color(i, n)
-            cv2.circle(img, (cx, cy), thick, color, -1, cv2.LINE_AA)
+            cv2.circle(img, (cx_s, cy_s), thick, color, -1, cv2.LINE_AA)
 
         # Thin dark outline along body edges for definition
         for i in range(n - 1, -1, -1):
             r, c = self.snake[i]
-            cx, cy = c * cell + half, r * cell + half
-            cv2.circle(img, (cx, cy), thick, (20, 50, 10), 1, cv2.LINE_AA)
+            cx_s, cy_s = c * cell + half, r * cell + half
+            cv2.circle(img, (cx_s, cy_s), thick, (20, 50, 10), 1,
+                       cv2.LINE_AA)
 
         # --- Head: distinctly larger and brighter ---
         if self.snake:
             hr, hc = self.snake[0]
             hcx, hcy = hc * cell + half, hr * cell + half
             head_r = thick + 3
-            # Bright lime-green head stands out from body
             cv2.circle(img, (hcx, hcy), head_r, (60, 255, 60), -1,
                        cv2.LINE_AA)
             cv2.circle(img, (hcx, hcy), head_r, (30, 120, 30), 2,
@@ -247,12 +301,24 @@ class SnakeEnv(gym.Env):
                 cv2.line(img, (tip_x, tip_y), (fx, fy),
                          (220, 50, 50), 2, cv2.LINE_AA)
 
-        # --- Food: bright red apple (high contrast on black) ---
+        # --- 4. Food: pulsing concentric rings + apple ---
         if self.food:
             fr, fc = self.food
             fcy = fr * cell + half
             fcx = fc * cell + half
             food_r = cell // 2 - 2
+
+            # Pulsing concentric rings (animation based on step count)
+            pulse = (self._step_count % 20) / 20.0  # 0..1 cycle
+            for ring_i in range(3):
+                ring_phase = (pulse + ring_i * 0.33) % 1.0
+                ring_radius = int(food_r + 4 + ring_phase * cell * 0.6)
+                ring_alpha = max(0.0, 0.5 - ring_phase * 0.5)
+                ring_color = (int(80 * ring_alpha), int(12 * ring_alpha),
+                              int(12 * ring_alpha))
+                cv2.circle(img, (fcx, fcy), ring_radius, ring_color, 1,
+                           cv2.LINE_AA)
+
             # Glow ring
             cv2.circle(img, (fcx, fcy), food_r + 3, (80, 15, 15), -1,
                        cv2.LINE_AA)
@@ -276,26 +342,49 @@ class SnakeEnv(gym.Env):
             cv2.fillConvexPoly(img, leaf_pts, (50, 180, 60),
                                lineType=cv2.LINE_AA)
 
-        # Bright green border (like a classic game frame)
+        # --- 7. Border: green normally, red flash on death ---
+        if self._dead:
+            border_color = (40, 40, 220)  # BGR red
+        else:
+            border_color = (30, 140, 30)
         cv2.rectangle(img, (0, 0), (img_size - 1, img_size - 1),
-                      (30, 140, 30), 3)
+                      border_color, 3)
 
-        # Score overlay (top-right) — white text for visibility
-        score_text = f"Score: {self._score}"
+        # --- 6. Gradient HUD banner at top ---
+        banner_h = 32
+        banner = img[0:banner_h, :, :].copy()
+        # Semi-transparent dark gradient overlay
+        for by in range(banner_h):
+            alpha = 0.85 - 0.3 * (by / banner_h)  # stronger at top
+            banner[by] = (banner[by].astype(np.float32) * (1 - alpha)
+                          + np.array([12, 14, 8], dtype=np.float32)
+                          * alpha * 255 / 14).astype(np.uint8)
+        img[0:banner_h, :, :] = banner
+        # Thin separator line under banner
+        cv2.line(img, (0, banner_h - 1), (img_size, banner_h - 1),
+                 (30, 100, 30), 1)
+
         font = cv2.FONT_HERSHEY_SIMPLEX
-        text_w = cv2.getTextSize(score_text, font, 0.6, 2)[0][0]
-        tx = img_size - text_w - 12
-        # Background box for readability
-        cv2.rectangle(img, (tx - 4, 2), (img_size - 4, 28),
-                      (10, 10, 10), -1)
-        cv2.putText(img, score_text, (tx, 22), font, 0.6,
-                    (60, 255, 60), 2, cv2.LINE_AA)
+        font_scale = 0.55
+        font_thick = 2
+        title_color = (50, 220, 50)
+        score_color = (60, 255, 60)
 
-        # Length indicator (top-left)
-        len_text = f"Len: {n}"
-        cv2.rectangle(img, (4, 2), (90, 28), (10, 10, 10), -1)
-        cv2.putText(img, len_text, (8, 22), font, 0.6,
-                    (60, 255, 60), 2, cv2.LINE_AA)
+        # "SNAKE" title left
+        cv2.putText(img, "SNAKE", (10, 23), font, font_scale,
+                    title_color, font_thick, cv2.LINE_AA)
+
+        # "Score: X" center
+        score_text = f"Score: {self._score}"
+        stw = cv2.getTextSize(score_text, font, font_scale, font_thick)[0][0]
+        cv2.putText(img, score_text, ((img_size - stw) // 2, 23), font,
+                    font_scale, score_color, font_thick, cv2.LINE_AA)
+
+        # "Length: Y" right
+        len_text = f"Length: {n}"
+        ltw = cv2.getTextSize(len_text, font, font_scale, font_thick)[0][0]
+        cv2.putText(img, len_text, (img_size - ltw - 10, 23), font,
+                    font_scale, score_color, font_thick, cv2.LINE_AA)
 
         return img
 

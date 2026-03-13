@@ -33,6 +33,7 @@ from typing import Dict, Any, Optional
 
 from src.algorithms.base_trainer import BaseTrainer
 from src.algorithms.device import select_device
+from src.algorithms.frame_utils import capture_display_frame
 from src.algorithms.rainbow.rainbow_network import RainbowNetwork
 from src.algorithms.rainbow.prioritized_replay import (
     PrioritizedReplayBuffer,
@@ -577,16 +578,8 @@ class RainbowTrainer(BaseTrainer):
                 game_metric = max(game_metric, game_metric_val)
                 obs = next_obs_proc
 
-                # Capture frame for visualization
-                try:
-                    last_frame = self.env.unwrapped.screen.copy()
-                except (AttributeError, Exception):
-                    try:
-                        frame = self.env.render(mode='rgb_array')
-                        if frame is not None:
-                            last_frame = frame
-                    except Exception:
-                        pass
+                # Capture display-quality frame for visualization
+                last_frame = capture_display_frame(self.env, fallback_obs=next_obs)
 
                 # Live gameplay display
                 if self.visualizer and step % 4 == 0:

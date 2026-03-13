@@ -492,9 +492,9 @@ def _make_sb3_compat_wrapper_class():
             truncated = False
             return obs, reward, terminated, truncated, info
 
-        def render(self):
-            """Render the environment."""
-            return self.env.render()
+        def render(self, *args, **kwargs):
+            """Render the environment (passes through mode parameter)."""
+            return self.env.render(*args, **kwargs)
 
         def close(self):
             """Close the environment."""
