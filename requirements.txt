@@ -38,8 +38,13 @@ tqdm>=4.65                     # Progress bars for training loops
 # --- Optional: Board Games ---
 python-chess>=1.9              # Chess engine (required for built-in Chess game only)
 
-# --- Optional: ROM Emulation ---
-# stable-retro>=0.9            # Retro game emulation (Sonic, Pokemon, etc.)
+# --- Optional: Game Boy Emulation (Pokemon Red) ---
+pyboy>=2.4                      # Game Boy emulator (Pokemon Red via PyBoy)
+scikit-image>=0.20              # Frame downscaling for Game Boy games
+einops>=0.7                     # Tensor reshaping (exploration map)
+
+# --- Optional: ROM Emulation (Sonic, etc.) ---
+# stable-retro>=0.9            # Retro game emulation (Sonic, etc.)
 #                               # Install: pip install stable-retro
 #                               # ROMs must be imported separately:
 #                               #   python -m retro.import /path/to/rom/directory

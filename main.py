@@ -562,15 +562,16 @@ def main():
         from src.streaming.stream_manager import StreamManager
         from src.streaming.overlay_manager import OverlayManager
 
-        # Get first music file for audio stream (if available)
-        audio_file = None
+        # Pass full music playlist to stream (ffmpeg will loop through all
+        # tracks using its concat demuxer — independent of pygame playback)
+        audio_files = []
         if music_manager and music_manager.playlist:
-            audio_file = music_manager.playlist[0]
+            audio_files = music_manager.playlist
 
         stream_manager = StreamManager(
             twitch_key=twitch_key,
             youtube_key=youtube_key,
-            audio_file=audio_file,
+            audio_files=audio_files,
         )
         overlay_manager = OverlayManager(resolution=(1280, 720))
 

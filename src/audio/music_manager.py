@@ -3,6 +3,7 @@ Background music manager for training sessions.
 
 Uses pygame.mixer.music for playlist-based playback.
 Supports .ogg, .mp3, and .wav files dropped into a music directory.
+Features crossfade between tracks and smooth fade in/out.
 """
 import os
 import random
@@ -14,13 +15,19 @@ import pygame
 SUPPORTED_EXTENSIONS = {'.ogg', '.mp3', '.wav', '.flac'}
 MUSIC_END_EVENT = pygame.USEREVENT + 99
 
+# Fade durations in milliseconds
+FADE_IN_MS = 2000    # 2 second fade-in when starting a track
+FADE_OUT_MS = 1500   # 1.5 second fade-out between tracks
+STOP_FADE_MS = 3000  # 3 second fade-out when stopping playback
+
 
 class MusicManager:
     """
     Manages background music playback during training.
 
     Scans a directory for audio files, shuffles them into a playlist,
-    and loops playback continuously.
+    and loops playback continuously. Smooth fade-in on start, crossfade
+    between tracks, and fade-out on stop.
 
     Args:
         music_dir: Path to directory containing music files.
@@ -58,22 +65,27 @@ class MusicManager:
         return tracks
 
     def play(self) -> None:
+        """Start playback with a fade-in effect."""
         if not self.playlist:
             return
         try:
             self.current_track = self.playlist[self._track_index]
             pygame.mixer.music.load(self.current_track)
-            pygame.mixer.music.play()
+            pygame.mixer.music.play(fade_ms=FADE_IN_MS)
             pygame.mixer.music.set_endevent(MUSIC_END_EVENT)
             self.is_playing = True
         except pygame.error as e:
             print(f'Music playback error: {e}')
 
     def stop(self) -> None:
+        """Stop playback with a fade-out effect."""
         try:
-            pygame.mixer.music.stop()
+            pygame.mixer.music.fadeout(STOP_FADE_MS)
         except pygame.error:
-            pass
+            try:
+                pygame.mixer.music.stop()
+            except pygame.error:
+                pass
         self.is_playing = False
 
     def pause(self) -> None:
@@ -91,13 +103,24 @@ class MusicManager:
                 pass
 
     def next_track(self) -> None:
+        """Advance to the next track with crossfade."""
         if not self.playlist:
             return
         self._track_index = (self._track_index + 1) % len(self.playlist)
         if self.is_playing:
-            self.play()
+            try:
+                # Fade out current track, then start next with fade-in
+                # pygame handles the transition: fadeout completes, then
+                # the MUSIC_END event fires unless we pre-load the next.
+                self.current_track = self.playlist[self._track_index]
+                pygame.mixer.music.load(self.current_track)
+                pygame.mixer.music.play(fade_ms=FADE_IN_MS)
+                pygame.mixer.music.set_endevent(MUSIC_END_EVENT)
+            except pygame.error as e:
+                print(f'Music track change error: {e}')
 
     def handle_music_end_event(self) -> None:
+        """Called when a track finishes — auto-advance with fade-in."""
         self.next_track()
 
     @property

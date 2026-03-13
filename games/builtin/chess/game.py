@@ -176,36 +176,24 @@ class ChessEnv(gym.Env):
                          interpolation=cv2.INTER_NEAREST)
         return np.expand_dims(obs, axis=-1)
 
+    # High-res rendering for the dashboard (independent of ML obs size)
+    DISPLAY_SIZE = 480
+
     def _render_rgb(self) -> np.ndarray:
-        """Render a colorful chess board for dashboard display."""
-        size = self.render_size
-        cell = size // 8
+        """Render a polished chess board for dashboard display.
+
+        Renders at 480px. Rich wood-toned board with geometric piece
+        shapes drawn using cv2 primitives — no font/text rendering.
+        White pieces are cream with dark outlines, black pieces are
+        dark charcoal with light outlines, both with 3D highlight effects.
+        """
+        size = self.DISPLAY_SIZE
+        cell = size // 8  # 60px per cell
         img = np.zeros((size, size, 3), dtype=np.uint8)
 
-        # Piece symbols (unicode)
-        PIECE_CHARS = {
-            (chess.PAWN, chess.WHITE): 'P',
-            (chess.KNIGHT, chess.WHITE): 'N',
-            (chess.BISHOP, chess.WHITE): 'B',
-            (chess.ROOK, chess.WHITE): 'R',
-            (chess.QUEEN, chess.WHITE): 'Q',
-            (chess.KING, chess.WHITE): 'K',
-            (chess.PAWN, chess.BLACK): 'p',
-            (chess.KNIGHT, chess.BLACK): 'n',
-            (chess.BISHOP, chess.BLACK): 'b',
-            (chess.ROOK, chess.BLACK): 'r',
-            (chess.QUEEN, chess.BLACK): 'q',
-            (chess.KING, chess.BLACK): 'k',
-        }
-
-        PIECE_COLORS = {
-            chess.WHITE: (240, 240, 240),  # White pieces
-            chess.BLACK: (30, 30, 30),      # Black pieces
-        }
-
-        # Light/dark square colors
-        LIGHT_SQ = (235, 210, 170)  # Warm cream
-        DARK_SQ = (170, 120, 70)    # Wood brown
+        # Light/dark square colors (rich wood tones)
+        LIGHT_SQ = (230, 210, 175)  # Warm cream
+        DARK_SQ = (160, 110, 65)    # Deep wood brown
 
         # Draw board squares
         for row in range(8):
@@ -217,34 +205,232 @@ class ChessEnv(gym.Env):
                 else:
                     img[y1:y2, x1:x2] = DARK_SQ
 
-        # Draw pieces
-        font = cv2.FONT_HERSHEY_SIMPLEX
-        font_scale = max(0.25, cell / 28.0)
-        thickness = max(1, cell // 14)
-
+        # Draw each piece as a geometric shape
         for sq in range(64):
             piece = self.board.piece_at(sq)
             if piece is None:
                 continue
             row = 7 - chess.square_rank(sq)
             col = chess.square_file(sq)
-
-            char = PIECE_CHARS.get((piece.piece_type, piece.color), '?')
-            color = PIECE_COLORS[piece.color]
-
-            # Center the character in the cell
-            text_size = cv2.getTextSize(char, font, font_scale, thickness)[0]
-            tx = col * cell + (cell - text_size[0]) // 2
-            ty = row * cell + (cell + text_size[1]) // 2
-
-            # Draw outline for contrast
-            outline_color = (0, 0, 0) if piece.color == chess.WHITE else (200, 200, 200)
-            cv2.putText(img, char, (tx, ty), font, font_scale,
-                        outline_color, thickness + 1, cv2.LINE_AA)
-            cv2.putText(img, char, (tx, ty), font, font_scale,
-                        color, thickness, cv2.LINE_AA)
+            cx = col * cell + cell // 2
+            cy = row * cell + cell // 2
+            self._draw_piece(img, piece, cx, cy, cell)
 
         return img
+
+    def _draw_piece(self, img, piece, cx, cy, cell):
+        """Draw a single chess piece using geometric shapes."""
+        is_white = piece.color == chess.WHITE
+        # Color palette
+        if is_white:
+            fill = (235, 230, 215)   # Cream white
+            dark = (180, 170, 150)   # Shadow
+            outline = (80, 70, 55)   # Dark outline
+            highlight = (255, 252, 245)
+        else:
+            fill = (55, 50, 48)      # Dark charcoal
+            dark = (30, 28, 26)      # Shadow
+            outline = (160, 155, 145)  # Light outline
+            highlight = (90, 85, 80)
+
+        r = cell // 2 - 4  # Piece radius fits within cell
+        base_y = cy + r - 2  # Base of the piece
+        top_offset = r  # How far up the piece extends
+
+        pt = piece.piece_type
+
+        if pt == chess.PAWN:
+            self._draw_pawn(img, cx, cy, r, fill, dark, outline, highlight)
+        elif pt == chess.ROOK:
+            self._draw_rook(img, cx, cy, r, fill, dark, outline, highlight)
+        elif pt == chess.KNIGHT:
+            self._draw_knight(img, cx, cy, r, fill, dark, outline, highlight)
+        elif pt == chess.BISHOP:
+            self._draw_bishop(img, cx, cy, r, fill, dark, outline, highlight)
+        elif pt == chess.QUEEN:
+            self._draw_queen(img, cx, cy, r, fill, dark, outline, highlight)
+        elif pt == chess.KING:
+            self._draw_king(img, cx, cy, r, fill, dark, outline, highlight)
+
+    def _draw_base(self, img, cx, cy, r, fill, dark, outline):
+        """Draw the common base/pedestal of a chess piece."""
+        # Shadow ellipse
+        cv2.ellipse(img, (cx + 1, cy + r - 1), (r - 2, r // 4),
+                    0, 0, 360, dark, -1, cv2.LINE_AA)
+        # Base ellipse
+        cv2.ellipse(img, (cx, cy + r - 2), (r - 2, r // 4),
+                    0, 0, 360, fill, -1, cv2.LINE_AA)
+        cv2.ellipse(img, (cx, cy + r - 2), (r - 2, r // 4),
+                    0, 0, 360, outline, 1, cv2.LINE_AA)
+
+    def _draw_pawn(self, img, cx, cy, r, fill, dark, outline, highlight):
+        """Pawn: small circle on a tapered stem with base."""
+        self._draw_base(img, cx, cy, r, fill, dark, outline)
+        # Stem
+        hw = r // 3
+        pts = np.array([
+            [cx - hw, cy + r // 3],
+            [cx + hw, cy + r // 3],
+            [cx + hw - 2, cy - r // 4],
+            [cx - hw + 2, cy - r // 4],
+        ], dtype=np.int32)
+        cv2.fillConvexPoly(img, pts, fill, cv2.LINE_AA)
+        cv2.polylines(img, [pts], True, outline, 1, cv2.LINE_AA)
+        # Head circle
+        head_r = r // 3 + 1
+        cv2.circle(img, (cx, cy - r // 3), head_r, fill, -1, cv2.LINE_AA)
+        cv2.circle(img, (cx, cy - r // 3), head_r, outline, 1, cv2.LINE_AA)
+        # Highlight
+        cv2.circle(img, (cx - 1, cy - r // 3 - 2), max(2, head_r // 2),
+                   highlight, -1, cv2.LINE_AA)
+
+    def _draw_rook(self, img, cx, cy, r, fill, dark, outline, highlight):
+        """Rook: rectangular tower with battlements."""
+        self._draw_base(img, cx, cy, r, fill, dark, outline)
+        # Tower body
+        hw = r * 2 // 5
+        top = cy - r // 2
+        bot = cy + r // 3
+        cv2.rectangle(img, (cx - hw, top), (cx + hw, bot), fill, -1)
+        cv2.rectangle(img, (cx - hw, top), (cx + hw, bot), outline, 1)
+        # Battlements (three notches)
+        bw = hw * 2 // 3
+        bt = top - r // 4
+        notch = hw // 3
+        for offset in [-hw, -notch, notch]:
+            cv2.rectangle(img, (cx + offset, bt),
+                          (cx + offset + notch, top), fill, -1)
+            cv2.rectangle(img, (cx + offset, bt),
+                          (cx + offset + notch, top), outline, 1)
+        # Highlight
+        cv2.line(img, (cx - hw + 2, top + 2), (cx - hw + 2, bot - 2),
+                 highlight, 1, cv2.LINE_AA)
+
+    def _draw_knight(self, img, cx, cy, r, fill, dark, outline, highlight):
+        """Knight: horse head shape (stylized L-profile)."""
+        self._draw_base(img, cx, cy, r, fill, dark, outline)
+        # Horse head profile (simplified)
+        pts = np.array([
+            [cx - r // 3, cy + r // 3],       # Bottom left
+            [cx - r // 3, cy - r // 4],        # Mid left
+            [cx - r // 5, cy - r // 2],        # Ear left
+            [cx + r // 8, cy - r * 2 // 3],    # Top (mane)
+            [cx + r // 3, cy - r // 3],        # Nose tip
+            [cx + r // 3, cy - r // 6],        # Jaw
+            [cx + r // 5, cy],                 # Chin
+            [cx + r // 4, cy + r // 3],        # Bottom right
+        ], dtype=np.int32)
+        cv2.fillPoly(img, [pts], fill, cv2.LINE_AA)
+        cv2.polylines(img, [pts], True, outline, 1, cv2.LINE_AA)
+        # Eye
+        cv2.circle(img, (cx, cy - r // 4), max(1, r // 8),
+                   outline, -1, cv2.LINE_AA)
+        # Highlight
+        cv2.line(img, (cx - r // 4, cy - r // 5),
+                 (cx - r // 6, cy - r // 2 + 2), highlight, 1, cv2.LINE_AA)
+
+    def _draw_bishop(self, img, cx, cy, r, fill, dark, outline, highlight):
+        """Bishop: tall pointed hat on a stem."""
+        self._draw_base(img, cx, cy, r, fill, dark, outline)
+        # Body (tapered)
+        hw = r // 3
+        pts = np.array([
+            [cx - hw, cy + r // 4],
+            [cx + hw, cy + r // 4],
+            [cx + r // 6, cy - r // 3],
+            [cx, cy - r * 2 // 3],
+            [cx - r // 6, cy - r // 3],
+        ], dtype=np.int32)
+        cv2.fillPoly(img, [pts], fill, cv2.LINE_AA)
+        cv2.polylines(img, [pts], True, outline, 1, cv2.LINE_AA)
+        # Top ball
+        cv2.circle(img, (cx, cy - r * 2 // 3 - 2), max(2, r // 6),
+                   fill, -1, cv2.LINE_AA)
+        cv2.circle(img, (cx, cy - r * 2 // 3 - 2), max(2, r // 6),
+                   outline, 1, cv2.LINE_AA)
+        # Diagonal slash (bishop's notch)
+        cv2.line(img, (cx - r // 5, cy - r // 6),
+                 (cx + r // 5, cy - r // 3), outline, 1, cv2.LINE_AA)
+        # Highlight
+        cv2.line(img, (cx - r // 5, cy + r // 6),
+                 (cx - r // 6, cy - r // 3), highlight, 1, cv2.LINE_AA)
+
+    def _draw_queen(self, img, cx, cy, r, fill, dark, outline, highlight):
+        """Queen: crown with five points atop a body."""
+        self._draw_base(img, cx, cy, r, fill, dark, outline)
+        # Body
+        hw = r * 2 // 5
+        pts = np.array([
+            [cx - hw, cy + r // 4],
+            [cx + hw, cy + r // 4],
+            [cx + r // 5, cy - r // 6],
+            [cx - r // 5, cy - r // 6],
+        ], dtype=np.int32)
+        cv2.fillConvexPoly(img, pts, fill, cv2.LINE_AA)
+        cv2.polylines(img, [pts], True, outline, 1, cv2.LINE_AA)
+        # Crown points (5 points)
+        crown_base = cy - r // 6
+        crown_top = cy - r * 3 // 4
+        mid_y = (crown_base + crown_top) // 2
+        points = []
+        for i in range(5):
+            px = cx + int((i - 2) * r * 2 / 5 / 2)
+            points.append([px, crown_top])
+            if i < 4:
+                mx = (px + cx + int((i - 1) * r * 2 / 5 / 2)) // 2
+                points.append([mx, mid_y])
+        # Close crown
+        points.append([cx + int(2 * r * 2 / 5 / 2), crown_top])
+        points.append([cx + r // 5, crown_base])
+        points.append([cx - r // 5, crown_base])
+        pts_crown = np.array(points, dtype=np.int32)
+        cv2.fillPoly(img, [pts_crown], fill, cv2.LINE_AA)
+        cv2.polylines(img, [pts_crown], True, outline, 1, cv2.LINE_AA)
+        # Crown jewel dots
+        for i in range(5):
+            px = cx + int((i - 2) * r * 2 / 5 / 2)
+            cv2.circle(img, (px, crown_top + 1), max(1, r // 8),
+                       outline, -1, cv2.LINE_AA)
+        # Highlight
+        cv2.line(img, (cx - hw + 2, cy + r // 6),
+                 (cx - r // 5, cy - r // 6), highlight, 1, cv2.LINE_AA)
+
+    def _draw_king(self, img, cx, cy, r, fill, dark, outline, highlight):
+        """King: body with a cross on top."""
+        self._draw_base(img, cx, cy, r, fill, dark, outline)
+        # Body
+        hw = r * 2 // 5
+        pts = np.array([
+            [cx - hw, cy + r // 4],
+            [cx + hw, cy + r // 4],
+            [cx + r // 5, cy - r // 4],
+            [cx - r // 5, cy - r // 4],
+        ], dtype=np.int32)
+        cv2.fillConvexPoly(img, pts, fill, cv2.LINE_AA)
+        cv2.polylines(img, [pts], True, outline, 1, cv2.LINE_AA)
+        # Horizontal band
+        cv2.rectangle(img, (cx - hw, cy - r // 8),
+                      (cx + hw, cy + r // 8), fill, -1)
+        cv2.rectangle(img, (cx - hw, cy - r // 8),
+                      (cx + hw, cy + r // 8), outline, 1)
+        # Cross on top
+        cross_top = cy - r * 3 // 4
+        cross_base = cy - r // 4
+        cross_hw = r // 6
+        # Vertical bar
+        cv2.rectangle(img, (cx - cross_hw // 2, cross_top),
+                      (cx + cross_hw // 2, cross_base), fill, -1)
+        cv2.rectangle(img, (cx - cross_hw // 2, cross_top),
+                      (cx + cross_hw // 2, cross_base), outline, 1)
+        # Horizontal bar
+        cross_mid = cross_top + (cross_base - cross_top) // 3
+        cv2.rectangle(img, (cx - cross_hw, cross_mid - cross_hw // 2),
+                      (cx + cross_hw, cross_mid + cross_hw // 2), fill, -1)
+        cv2.rectangle(img, (cx - cross_hw, cross_mid - cross_hw // 2),
+                      (cx + cross_hw, cross_mid + cross_hw // 2), outline, 1)
+        # Highlight on body
+        cv2.line(img, (cx - hw + 2, cy + r // 6),
+                 (cx - r // 5, cy - r // 4), highlight, 1, cv2.LINE_AA)
 
     def render(self, mode='rgb_array'):
         return self._render_rgb()

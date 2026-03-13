@@ -142,95 +142,160 @@ class SnakeEnv(gym.Env):
     # High-res rendering for the dashboard (independent of ML obs size)
     DISPLAY_SIZE = 480
 
-    def _render_rgb(self) -> np.ndarray:
-        """Render a colorful version for dashboard/stream display.
+    def _segment_color(self, seg_idx: int, n: int):
+        """Color for a snake segment. Head=bright lime, tail=darker green."""
+        t = 1.0 - seg_idx / max(n, 1)  # 0=tail end, 1=head end
+        g = int(120 + 135 * t)          # 120..255
+        r = int(30 + 80 * t)            # 30..110
+        return (r, g, 20)
 
-        Renders at 480px for crisp visuals. Green gradient snake with
-        rounded segments, red apple with glow, score overlay, and
-        subtle gridlines on a dark field.
+    def _render_rgb(self) -> np.ndarray:
+        """Render a classic-style snake game for dashboard/stream.
+
+        High-contrast design: bright green snake on a black background
+        with visible grid lines — instantly recognizable as Snake.
+        Connected body via filled rectangles between segments.
         """
         size = self.DISPLAY_SIZE
         cell = size // self.grid_size  # 30px per cell at 480/16
         img_size = cell * self.grid_size
         img = np.zeros((img_size, img_size, 3), dtype=np.uint8)
 
-        # Background: dark green-tinted field
-        img[:] = (18, 22, 18)
+        # Pure black background — classic snake look, high contrast
+        img[:] = (10, 10, 10)
 
-        # Subtle gridlines
+        # Visible grid lines (dark gray on black — subtle but clear)
         for i in range(1, self.grid_size):
             pos = i * cell
-            cv2.line(img, (pos, 0), (pos, img_size), (30, 38, 30), 1)
-            cv2.line(img, (0, pos), (img_size, pos), (30, 38, 30), 1)
+            cv2.line(img, (pos, 0), (pos, img_size), (35, 35, 35), 1)
+            cv2.line(img, (0, pos), (img_size, pos), (35, 35, 35), 1)
 
-        # Draw snake body with gradient and rounded segments
         n = len(self.snake)
-        for idx, segment in enumerate(reversed(self.snake)):
-            # Draw tail-to-head so head draws last (on top)
-            seg_idx = n - 1 - idx  # 0 = head, n-1 = tail
-            r, c = segment
-            cy_center = r * cell + cell // 2
-            cx_center = c * cell + cell // 2
-            # Gradient: tail is dark, head is bright
-            t = 1.0 - seg_idx / max(n, 1)  # 0=tail, 1=head
-            g_val = int(80 + 160 * t)
-            b_val = int(30 + 50 * t)
-            color = (10, g_val, b_val)
-            radius = cell // 2 - 2
-            cv2.circle(img, (cx_center, cy_center), radius, color, -1,
-                       lineType=cv2.LINE_AA)
-            # Subtle border
-            cv2.circle(img, (cx_center, cy_center), radius,
-                       (10, min(255, g_val + 30), b_val + 10), 1,
-                       lineType=cv2.LINE_AA)
+        half = cell // 2
+        # Body thickness: nearly fills the cell for visibility
+        thick = cell // 2 - 2  # half-width of the body band
 
-        # Snake head with eyes and distinct color
+        # --- Draw connected body: rects between segments + circles ---
+        # Tail-to-head order so brighter head colors draw on top.
+        for i in range(n - 1, 0, -1):
+            r1, c1 = self.snake[i]
+            r2, c2 = self.snake[i - 1]
+            cx1, cy1 = c1 * cell + half, r1 * cell + half
+            cx2, cy2 = c2 * cell + half, r2 * cell + half
+            color = self._segment_color(i - 1, n)
+            if r1 == r2:
+                min_x, max_x = min(cx1, cx2), max(cx1, cx2)
+                cv2.rectangle(img, (min_x, cy1 - thick),
+                              (max_x, cy1 + thick), color, -1)
+            elif c1 == c2:
+                min_y, max_y = min(cy1, cy2), max(cy1, cy2)
+                cv2.rectangle(img, (cx1 - thick, min_y),
+                              (cx1 + thick, max_y), color, -1)
+
+        # Rounded joints at every segment
+        for i in range(n - 1, -1, -1):
+            r, c = self.snake[i]
+            cx, cy = c * cell + half, r * cell + half
+            color = self._segment_color(i, n)
+            cv2.circle(img, (cx, cy), thick, color, -1, cv2.LINE_AA)
+
+        # Thin dark outline along body edges for definition
+        for i in range(n - 1, -1, -1):
+            r, c = self.snake[i]
+            cx, cy = c * cell + half, r * cell + half
+            cv2.circle(img, (cx, cy), thick, (20, 50, 10), 1, cv2.LINE_AA)
+
+        # --- Head: distinctly larger and brighter ---
         if self.snake:
             hr, hc = self.snake[0]
-            hcy = hr * cell + cell // 2
-            hcx = hc * cell + cell // 2
-            head_r = cell // 2 - 1
-            cv2.circle(img, (hcx, hcy), head_r, (30, 220, 70), -1,
-                       lineType=cv2.LINE_AA)
-            cv2.circle(img, (hcx, hcy), head_r, (50, 255, 100), 1,
-                       lineType=cv2.LINE_AA)
-            # Eyes (direction-aware)
-            dr, dc = self._directions[self.direction]
-            eye_offset = cell // 5
-            for side in (-1, 1):
-                # Perpendicular offset for two eyes
-                ex = hcx + dc * eye_offset + (-dr) * side * (cell // 5)
-                ey = hcy + dr * eye_offset + dc * side * (cell // 5)
-                cv2.circle(img, (ex, ey), max(2, cell // 8),
-                           (255, 255, 255), -1, lineType=cv2.LINE_AA)
-                # Pupil
-                cv2.circle(img, (ex + dc, ey + dr), max(1, cell // 14),
-                           (20, 20, 20), -1, lineType=cv2.LINE_AA)
+            hcx, hcy = hc * cell + half, hr * cell + half
+            head_r = thick + 3
+            # Bright lime-green head stands out from body
+            cv2.circle(img, (hcx, hcy), head_r, (60, 255, 60), -1,
+                       cv2.LINE_AA)
+            cv2.circle(img, (hcx, hcy), head_r, (30, 120, 30), 2,
+                       cv2.LINE_AA)
+            # Highlight
+            cv2.circle(img, (hcx - head_r // 3, hcy - head_r // 3),
+                       max(2, head_r // 2), (140, 255, 140), -1,
+                       cv2.LINE_AA)
 
-        # Food: bright red apple with glow
+            dr, dc = self._directions[self.direction]
+            eye_off = cell // 4
+            eye_r = max(3, cell // 6)
+            pupil_r = max(2, cell // 10)
+            for side in (-1, 1):
+                ex = hcx + dc * eye_off + (-dr) * side * (cell // 4)
+                ey = hcy + dr * eye_off + dc * side * (cell // 4)
+                cv2.circle(img, (ex, ey), eye_r,
+                           (255, 255, 255), -1, cv2.LINE_AA)
+                cv2.circle(img, (ex + dc * 2, ey + dr * 2), pupil_r,
+                           (10, 10, 10), -1, cv2.LINE_AA)
+
+            # Red forked tongue
+            tongue_len = cell // 3
+            base_x = hcx + dc * head_r
+            base_y = hcy + dr * head_r
+            tip_x = base_x + dc * tongue_len
+            tip_y = base_y + dr * tongue_len
+            cv2.line(img, (base_x, base_y), (tip_x, tip_y),
+                     (220, 50, 50), 2, cv2.LINE_AA)
+            fork = cell // 5
+            for side in (-1, 1):
+                fx = tip_x + dc * fork + (-dr) * side * fork
+                fy = tip_y + dr * fork + dc * side * fork
+                cv2.line(img, (tip_x, tip_y), (fx, fy),
+                         (220, 50, 50), 2, cv2.LINE_AA)
+
+        # --- Food: bright red apple (high contrast on black) ---
         if self.food:
             fr, fc = self.food
-            fcy = fr * cell + cell // 2
-            fcx = fc * cell + cell // 2
+            fcy = fr * cell + half
+            fcx = fc * cell + half
             food_r = cell // 2 - 2
-            # Outer glow
-            cv2.circle(img, (fcx, fcy), food_r + 3, (60, 15, 15), -1,
-                       lineType=cv2.LINE_AA)
-            # Main apple
-            cv2.circle(img, (fcx, fcy), food_r, (220, 40, 40), -1,
-                       lineType=cv2.LINE_AA)
-            # Highlight
+            # Glow ring
+            cv2.circle(img, (fcx, fcy), food_r + 3, (80, 15, 15), -1,
+                       cv2.LINE_AA)
+            # Apple body
+            cv2.circle(img, (fcx, fcy), food_r, (230, 40, 40), -1,
+                       cv2.LINE_AA)
+            # Specular highlight
             cv2.circle(img, (fcx - food_r // 3, fcy - food_r // 3),
-                       max(2, food_r // 3), (255, 130, 130), -1,
-                       lineType=cv2.LINE_AA)
+                       max(2, food_r // 3), (255, 150, 150), -1,
+                       cv2.LINE_AA)
+            # Stem
+            stem_top = fcy - food_r - 4
+            cv2.line(img, (fcx, fcy - food_r + 2), (fcx + 1, stem_top),
+                     (90, 60, 30), 2, cv2.LINE_AA)
+            # Leaf
+            leaf_pts = np.array([
+                [fcx + 2, stem_top],
+                [fcx + food_r // 2 + 4, stem_top - 4],
+                [fcx + 3, stem_top + 3],
+            ], dtype=np.int32)
+            cv2.fillConvexPoly(img, leaf_pts, (50, 180, 60),
+                               lineType=cv2.LINE_AA)
 
-        # Score overlay (top-right) showing snake length
-        score_text = f"Length: {n}"
+        # Bright green border (like a classic game frame)
+        cv2.rectangle(img, (0, 0), (img_size - 1, img_size - 1),
+                      (30, 140, 30), 3)
+
+        # Score overlay (top-right) — white text for visibility
+        score_text = f"Score: {self._score}"
         font = cv2.FONT_HERSHEY_SIMPLEX
-        cv2.putText(img, score_text, (img_size - 145, 22), font, 0.55,
-                    (0, 0, 0), 3, cv2.LINE_AA)
-        cv2.putText(img, score_text, (img_size - 145, 22), font, 0.55,
-                    (100, 255, 140), 1, cv2.LINE_AA)
+        text_w = cv2.getTextSize(score_text, font, 0.6, 2)[0][0]
+        tx = img_size - text_w - 12
+        # Background box for readability
+        cv2.rectangle(img, (tx - 4, 2), (img_size - 4, 28),
+                      (10, 10, 10), -1)
+        cv2.putText(img, score_text, (tx, 22), font, 0.6,
+                    (60, 255, 60), 2, cv2.LINE_AA)
+
+        # Length indicator (top-left)
+        len_text = f"Len: {n}"
+        cv2.rectangle(img, (4, 2), (90, 28), (10, 10, 10), -1)
+        cv2.putText(img, len_text, (8, 22), font, 0.6,
+                    (60, 255, 60), 2, cv2.LINE_AA)
 
         return img
 

@@ -155,19 +155,19 @@ class TicTacToeEnv(gym.Env):
 
                 if self.board[r, c] == 1:
                     # X — thick neon blue diagonals with glow
-                    cv2.line(img, (x1, y1), (x2, y2), (40, 70, 130),
-                             stroke + 4, cv2.LINE_AA)
-                    cv2.line(img, (x2, y1), (x1, y2), (40, 70, 130),
-                             stroke + 4, cv2.LINE_AA)
-                    cv2.line(img, (x1, y1), (x2, y2), (100, 170, 255),
+                    cv2.line(img, (x1, y1), (x2, y2), (30, 60, 140),
+                             stroke + 6, cv2.LINE_AA)
+                    cv2.line(img, (x2, y1), (x1, y2), (30, 60, 140),
+                             stroke + 6, cv2.LINE_AA)
+                    cv2.line(img, (x1, y1), (x2, y2), (80, 180, 255),
                              stroke, cv2.LINE_AA)
-                    cv2.line(img, (x2, y1), (x1, y2), (100, 170, 255),
+                    cv2.line(img, (x2, y1), (x1, y2), (80, 180, 255),
                              stroke, cv2.LINE_AA)
                 elif self.board[r, c] == 2:
                     # O — thick neon red-pink circle with glow
-                    cv2.circle(img, (cx, cy), radius, (100, 30, 30),
-                               stroke + 4, cv2.LINE_AA)
-                    cv2.circle(img, (cx, cy), radius, (255, 85, 85),
+                    cv2.circle(img, (cx, cy), radius, (120, 25, 40),
+                               stroke + 6, cv2.LINE_AA)
+                    cv2.circle(img, (cx, cy), radius, (255, 65, 95),
                                stroke, cv2.LINE_AA)
 
         # Draw winning line if there's a winner
@@ -176,7 +176,7 @@ class TicTacToeEnv(gym.Env):
             (r1, c1), (r2, c2) = winning_line
             p1 = (c1 * cell + cell // 2, r1 * cell + cell // 2)
             p2 = (c2 * cell + cell // 2, r2 * cell + cell // 2)
-            color = (100, 170, 255) if self._winner == 1 else (255, 85, 85)
+            color = (80, 180, 255) if self._winner == 1 else (255, 65, 95)
             cv2.line(img, p1, p2, (255, 255, 255), stroke + 6, cv2.LINE_AA)
             cv2.line(img, p1, p2, color, stroke + 2, cv2.LINE_AA)
 

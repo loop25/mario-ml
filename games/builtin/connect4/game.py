@@ -125,6 +125,28 @@ class ConnectFourEnv(gym.Env):
                     return True
         return False
 
+    def _get_winning_cells(self):
+        """Return list of (row, col) for the winning four-in-a-row, or None."""
+        for player in (1, 2):
+            b = self.board
+            for r in range(ROWS):
+                for c in range(COLS - 3):
+                    if all(b[r, c + i] == player for i in range(4)):
+                        return [(r, c + i) for i in range(4)]
+            for r in range(ROWS - 3):
+                for c in range(COLS):
+                    if all(b[r + i, c] == player for i in range(4)):
+                        return [(r + i, c) for i in range(4)]
+            for r in range(ROWS - 3):
+                for c in range(COLS - 3):
+                    if all(b[r + i, c + i] == player for i in range(4)):
+                        return [(r + i, c + i) for i in range(4)]
+            for r in range(ROWS - 3):
+                for c in range(3, COLS):
+                    if all(b[r + i, c - i] == player for i in range(4)):
+                        return [(r + i, c - i) for i in range(4)]
+        return None
+
     def _render_obs(self) -> np.ndarray:
         """Render board as 84x84 grayscale."""
         grid = np.zeros((ROWS, COLS), dtype=np.uint8)
@@ -199,6 +221,15 @@ class ConnectFourEnv(gym.Env):
                     hl_r = max(3, radius // 3)
                     cv2.circle(img, (cx - radius // 4, cy - radius // 4),
                                hl_r, (255, 245, 150), -1, cv2.LINE_AA)
+
+        # Winning cells: bright white ring around the four connected pieces
+        winning = self._get_winning_cells()
+        if winning:
+            for wr, wc in winning:
+                wx = ox + wc * cell + cell // 2
+                wy = oy + wr * cell + cell // 2
+                cv2.circle(img, (wx, wy), radius + 3, (255, 255, 255),
+                           3, cv2.LINE_AA)
 
         return img
 

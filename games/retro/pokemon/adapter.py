@@ -1,45 +1,43 @@
 """
-Pokemon Red adapter for stable-retro.
+Pokemon Red adapter using PyBoy emulator.
 
-Wraps the Game Boy Pokemon Red ROM via stable-retro. Requires:
-  1. pip install stable-retro
-  2. A legally obtained Pokemon Red ROM imported with:
-     python -m retro.import /path/to/rom/directory
+Uses the PyBoy Game Boy emulator to run Pokemon Red with a rich
+exploration-based reward signal. Does NOT require stable-retro.
 
-Pokemon is fundamentally different from platformers — it's an RPG
-focused on exploration, collecting pokemon, and earning gym badges.
-The reward signal emphasizes exploration (new map tiles visited)
-rather than speed.
+Requirements:
+  1. pip install pyboy
+  2. A legally obtained Pokemon Red ROM file (PokemonRed.gb)
+  3. A PyBoy save state file (init.state) to skip the game intro
 
-Metrics map:
-  - badges (RAM): Number of gym badges earned → progress/score
-  - pokemon_count (RAM): Pokemon in party → secondary metric
-  - map_id + x/y (RAM): Current location → exploration tracking
+The environment reads Game Boy RAM directly to extract game state
+(player position, HP, badges, event flags) and rewards exploration
+of new map tiles, earning badges, and healing at Pokemon Centers.
+
+Adapted from PokemonRedExperiments v2 (MIT License):
+  https://github.com/PWhiddy/PokemonRedExperiments
 """
+
+import os
 from typing import List, Tuple
 
-from games.retro.base_retro_adapter import BaseRetroAdapter
+try:
+    import gymnasium as gym
+except ImportError:
+    import gym  # Legacy fallback
+
+from games.retro.base_pyboy_adapter import BasePyBoyAdapter
 from games.reward_config import (
     StandardMetrics,
     RewardConfig,
     ActionSpaceInfo,
 )
 
-
-# Game Boy: A, B, SELECT, START, UP, DOWN, LEFT, RIGHT
-_POKEMON_NUM_ACTIONS = 8
-
-_POKEMON_ACTION_LABELS = [
-    'A', 'B', 'Select', 'Start',
-    'Up', 'Down', 'Left', 'Right',
-]
-
 # Total badges in Pokemon Red
 _TOTAL_BADGES = 8
 
 
-class PokemonAdapter(BaseRetroAdapter):
-    """Adapter for Pokemon Red (Game Boy) via stable-retro."""
+class PokemonAdapter(BasePyBoyAdapter):
+    """Adapter for Pokemon Red via PyBoy emulator."""
 
     @property
     def name(self) -> str:
@@ -55,27 +53,38 @@ class PokemonAdapter(BaseRetroAdapter):
 
     @property
     def description(self) -> str:
-        return 'Classic Game Boy RPG — explore, catch pokemon, and earn gym badges.'
+        return 'Classic Game Boy RPG — explore Kanto, catch pokemon, earn gym badges. (Requires ROM)'
 
-    @property
-    def rom_name(self) -> str:
-        return 'PokemonRed-GameBoy'
+    def create_env(self, **kwargs) -> gym.Env:
+        """Create the Pokemon Red environment.
 
-    @property
-    def frame_skip(self) -> int:
-        # RPGs need less frame skip — menus and text matter
-        return 1
+        Kwargs:
+            gb_path: Path to PokemonRed.gb ROM file.
+            init_state: Path to init.state (PyBoy save state).
+            headless: Run without display. Default True.
+            simple_obs: Use image-only observations. Default True.
+            action_freq: Emulator ticks per action. Default 24.
+            max_steps: Steps per episode. Default 2048*80.
+            explore_weight: Exploration reward weight. Default 1.0.
+            reward_scale: Global reward scale. Default 0.5.
+        """
+        from games.retro.pokemon.red_gym_env import RedGymEnv
+        return RedGymEnv(config=kwargs)
 
     def get_action_space_info(self) -> ActionSpaceInfo:
         return ActionSpaceInfo(
-            num_actions=_POKEMON_NUM_ACTIONS,
-            action_labels=list(_POKEMON_ACTION_LABELS),
+            num_actions=7,
+            action_labels=['Down', 'Left', 'Right', 'Up', 'A', 'B', 'Start'],
         )
+
+    def get_observation_shape(self) -> Tuple[int, ...]:
+        # Default simple_obs mode: stacked grayscale frames
+        return (72, 80, 3)
 
     def extract_metrics(self, info: dict, episode_time: float) -> StandardMetrics:
         badges = info.get('badges', 0)
-        # Count bits set in badges byte (each bit = one badge)
-        badge_count = bin(badges).count('1') if isinstance(badges, int) else 0
+        # badges is already a count (not a bitmask) from our env
+        badge_count = badges if isinstance(badges, int) else 0
         progress = badge_count / _TOTAL_BADGES
         return StandardMetrics(
             progress=progress,
@@ -85,13 +94,15 @@ class PokemonAdapter(BaseRetroAdapter):
         )
 
     def get_reward_config(self) -> RewardConfig:
+        # The environment handles its own reward shaping internally,
+        # so we set minimal framework-level shaping.
         return RewardConfig(
-            time_penalty_per_second=0.0,    # RPG — no time pressure
-            completion_bonus=200.0,          # Huge bonus for badges
-            death_penalty=-5.0,              # Fainting is mild
-            idle_penalty_per_second=0.001,   # Very gentle idle nudge
-            speed_bonus_multiplier=0.0,      # No speed bonus for RPG
-            par_time_seconds=3600.0,         # 1 hour per badge (generous)
+            time_penalty_per_second=0.0,
+            completion_bonus=0.0,      # Env already rewards badges
+            death_penalty=0.0,         # Env tracks deaths internally
+            idle_penalty_per_second=0.0,
+            speed_bonus_multiplier=0.0,
+            par_time_seconds=3600.0,
         )
 
     def get_dashboard_config(self) -> dict:
@@ -112,4 +123,11 @@ class PokemonAdapter(BaseRetroAdapter):
         }
 
     def get_game_specific_options(self) -> dict:
-        return {}
+        return {
+            'gb_path': (str, 'PokemonRed.gb', 'Path to Pokemon Red ROM file'),
+            'simple_obs': (bool, True, 'Use simple image observations (CNN compatible)'),
+            'explore_weight': (float, 1.0, 'Exploration reward weight'),
+        }
+
+    # supported_algorithms, needs_sb3_compat, is_available, and
+    # get_human_render_frame are inherited from BasePyBoyAdapter.

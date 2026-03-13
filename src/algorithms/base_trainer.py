@@ -414,15 +414,25 @@ class BaseTrainer(ABC):
 
     def _handle_shutdown(self, signum, frame) -> None:
         """
-        Handle Ctrl+C gracefully by saving the model before exiting.
+        Handle Ctrl+C / SIGBREAK gracefully.
 
-        This signal handler catches SIGINT (Ctrl+C) and saves the
-        current model state before terminating. This prevents loss
-        of training progress when stopping training manually.
+        Sets _dashboard_closed so the training loop exits on its next
+        iteration check, saves the model immediately for safety, then
+        calls sys.exit(0) to unwind to main.py's finally block where
+        the stream manager and dashboard are cleaned up.
         """
-        print('\n\nCtrl+C detected! Saving model before exit...')
+        print('\n\nShutdown signal received! Saving model...')
+        self._dashboard_closed = True
         self._save_on_exit()
-        # Restore original handler and re-raise
+        # Close the dashboard window immediately so it doesn't appear
+        # frozen while the finally block runs stream cleanup.
+        if self.visualizer:
+            try:
+                self.visualizer.close()
+            except Exception:
+                pass
+        # Restore original handler and exit — the finally block in
+        # main.py will call stream_manager.stop() and env.close().
         signal.signal(signal.SIGINT, self._original_sigint)
         sys.exit(0)
 

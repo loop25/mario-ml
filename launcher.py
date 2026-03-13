@@ -1420,10 +1420,10 @@ class MarioLauncher:
         """Stop the running training subprocess with graduated shutdown.
 
         Graduated approach:
-        1. Send CTRL_C_EVENT (maps to SIGINT — the trainer has a handler)
-        2. Poll for 5 seconds
+        1. Send CTRL_BREAK_EVENT (maps to SIGBREAK — the trainer has a handler)
+        2. Poll for 10 seconds (model save + stream stop can take time)
         3. Escalate to terminate()
-        4. After 2 more seconds → kill()
+        4. After 3 more seconds → kill entire process tree
         """
         if self.process is None:
             return
@@ -1438,8 +1438,10 @@ class MarioLauncher:
         except (OSError, PermissionError):
             pass
 
-        # Step 2: Poll for up to 5 seconds
-        self._graduated_shutdown_poll(attempts=10)
+        # Step 2: Poll for up to 10 seconds (20 x 500ms)
+        # Needs longer than before because model save + ffmpeg stream
+        # shutdown can take several seconds.
+        self._graduated_shutdown_poll(attempts=20)
 
     def _graduated_shutdown_poll(self, attempts):
         """Poll subprocess during graduated shutdown."""
@@ -1467,11 +1469,16 @@ class MarioLauncher:
         except OSError:
             pass
 
-        # Step 4: Wait 2 more seconds then kill
-        self.root.after(2000, self._force_kill_if_running)
+        # Step 4: Wait 3 more seconds then kill entire process tree
+        self.root.after(3000, self._force_kill_if_running)
 
     def _force_kill_if_running(self):
-        """Final escalation: kill the process if it's still alive."""
+        """Final escalation: kill the entire process tree.
+
+        Uses taskkill /T on Windows to kill the process and all its
+        children (including ffmpeg). This prevents orphan processes
+        that keep streaming after training stops.
+        """
         if self.process is None:
             return
 
@@ -1480,8 +1487,16 @@ class MarioLauncher:
             self._on_process_finished(retcode)
             return
 
+        # Kill entire process tree (catches child ffmpeg processes)
         try:
-            self.process.kill()
+            if sys.platform == 'win32':
+                subprocess.call(
+                    ['taskkill', '/F', '/T', '/PID', str(self.process.pid)],
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                )
+            else:
+                self.process.kill()
         except OSError:
             pass
 
@@ -1559,8 +1574,8 @@ class MarioLauncher:
         except (OSError, PermissionError):
             pass
 
-        # Poll for up to 5 seconds
-        self._on_close_poll(attempts=10)
+        # Poll for up to 10 seconds (model save + stream stop)
+        self._on_close_poll(attempts=20)
 
     def _on_close_poll(self, attempts):
         """Poll during window-close shutdown."""
@@ -1583,12 +1598,20 @@ class MarioLauncher:
         self.root.after(2000, self._on_close_force)
 
     def _on_close_force(self):
-        """Final window close — kill process and destroy."""
+        """Final window close — kill entire process tree and destroy."""
         if self.process is not None:
             retcode = self.process.poll()
             if retcode is None:
                 try:
-                    self.process.kill()
+                    if sys.platform == 'win32':
+                        subprocess.call(
+                            ['taskkill', '/F', '/T', '/PID',
+                             str(self.process.pid)],
+                            stdout=subprocess.DEVNULL,
+                            stderr=subprocess.DEVNULL,
+                        )
+                    else:
+                        self.process.kill()
                 except OSError:
                     pass
             self.process = None

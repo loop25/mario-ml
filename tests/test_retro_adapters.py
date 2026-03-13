@@ -324,6 +324,8 @@ class TestSonicAdapter:
 
 
 class TestPokemonAdapter:
+    """Tests for the PyBoy-based Pokemon Red adapter."""
+
     def _make(self):
         from games.retro.pokemon.adapter import PokemonAdapter
         return PokemonAdapter()
@@ -338,27 +340,20 @@ class TestPokemonAdapter:
         assert adapter.name == 'Pokemon Red'
         assert adapter.category == 'rpg'
 
-    def test_rom_name(self):
-        adapter = self._make()
-        assert adapter.rom_name == 'PokemonRed-GameBoy'
-
-    def test_frame_skip_low(self):
-        """RPGs should have lower frame skip than platformers."""
-        adapter = self._make()
-        assert adapter.frame_skip == 1
-
     def test_action_space(self):
         adapter = self._make()
         info = adapter.get_action_space_info()
-        assert info.num_actions == 8  # Game Boy: A, B, Select, Start, D-pad
-        assert len(info.action_labels) == 8
+        # 7 actions: D-pad(4) + A, B, Start (no Select in training)
+        assert info.num_actions == 7
+        assert len(info.action_labels) == 7
         assert 'A' in info.action_labels
         assert 'B' in info.action_labels
         assert 'Up' in info.action_labels
 
     def test_observation_shape(self):
         adapter = self._make()
-        assert adapter.get_observation_shape() == (84, 84, 4)
+        # PyBoy Game Boy: 144x160 downscaled 2x = 72x80, 3 stacked frames
+        assert adapter.get_observation_shape() == (72, 80, 3)
 
     def test_extract_metrics_no_badges(self):
         adapter = self._make()
@@ -371,8 +366,8 @@ class TestPokemonAdapter:
 
     def test_extract_metrics_one_badge(self):
         adapter = self._make()
-        # Badge byte: bit 0 set = first badge earned
-        info = {'badges': 0b00000001}
+        # New env returns badge count directly (not bitmask)
+        info = {'badges': 1}
         metrics = adapter.extract_metrics(info, 300.0)
         assert metrics.progress == pytest.approx(1.0 / 8.0)
         assert metrics.score == 1.0
@@ -380,16 +375,14 @@ class TestPokemonAdapter:
 
     def test_extract_metrics_multiple_badges(self):
         adapter = self._make()
-        # Bits 0, 1, 2 set = 3 badges
-        info = {'badges': 0b00000111}
+        info = {'badges': 3}
         metrics = adapter.extract_metrics(info, 600.0)
         assert metrics.progress == pytest.approx(3.0 / 8.0)
         assert metrics.score == 3.0
 
     def test_extract_metrics_all_badges(self):
         adapter = self._make()
-        # All 8 bits set = all badges earned
-        info = {'badges': 0b11111111}
+        info = {'badges': 8}
         metrics = adapter.extract_metrics(info, 3600.0)
         assert metrics.progress == pytest.approx(1.0)
         assert metrics.score == 8.0
@@ -409,15 +402,13 @@ class TestPokemonAdapter:
         assert rc.time_penalty_per_second == 0.0
         assert rc.speed_bonus_multiplier == 0.0
 
-    def test_reward_config_mild_death(self):
+    def test_reward_config_env_internal(self):
+        """Reward shaping is handled internally by the env."""
         adapter = self._make()
         rc = adapter.get_reward_config()
-        assert rc.death_penalty == -5.0  # Fainting is mild
-
-    def test_reward_config_high_completion_bonus(self):
-        adapter = self._make()
-        rc = adapter.get_reward_config()
-        assert rc.completion_bonus == 200.0  # Big bonus for badges
+        # All zeros because the env handles reward shaping itself
+        assert rc.completion_bonus == 0.0
+        assert rc.death_penalty == 0.0
 
     def test_dashboard_config(self):
         adapter = self._make()
@@ -432,29 +423,33 @@ class TestPokemonAdapter:
         assert criteria['threshold'] == 1
         assert 'badge' in criteria['description'].lower()
 
-    def test_game_specific_options_empty(self):
+    def test_game_specific_options(self):
         adapter = self._make()
         opts = adapter.get_game_specific_options()
-        assert opts == {}
+        assert 'gb_path' in opts
+        assert 'simple_obs' in opts
 
     def test_needs_sb3_compat(self):
+        """PyBoy env is gymnasium-native, no compat wrapper needed."""
         adapter = self._make()
-        assert adapter.needs_sb3_compat() is True
+        assert adapter.needs_sb3_compat() is False
 
     def test_no_neat_support(self):
         adapter = self._make()
         algos = adapter.supported_algorithms()
         assert 'neat' not in algos
 
-    def test_is_available_without_retro(self):
-        from games.retro.base_retro_adapter import HAS_RETRO
+    def test_is_available_with_pyboy(self):
+        """PyBoy adapter reports available when pyboy is installed."""
         adapter = self._make()
-        if not HAS_RETRO:
+        try:
+            import pyboy
+            assert adapter.is_available() is True
+        except ImportError:
             assert adapter.is_available() is False
 
-    def test_create_env_raises_without_retro(self):
-        from games.retro.base_retro_adapter import HAS_RETRO
-        if not HAS_RETRO:
-            adapter = self._make()
-            with pytest.raises(ImportError, match='stable-retro'):
-                adapter.create_env()
+    def test_create_env_raises_without_rom(self):
+        """create_env should raise FileNotFoundError without ROM."""
+        adapter = self._make()
+        with pytest.raises(FileNotFoundError):
+            adapter.create_env(gb_path='nonexistent_rom.gb', headless=True)
