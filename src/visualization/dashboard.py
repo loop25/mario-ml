@@ -33,6 +33,15 @@ from src.visualization.grid_renderer import GridRenderer
 from src.visualization.graph_panel import GraphPanel
 from src.visualization.metrics_tracker import MetricsTracker
 
+try:
+    from src.visualization.swarm_renderer import SwarmRenderer
+    HAS_SWARM = True
+except ImportError:
+    HAS_SWARM = False
+
+# Display modes (cycled with V key)
+DISPLAY_MODES = ['single', 'grid', 'swarm']
+
 
 # ============================================================================
 # Dashboard Layout Ratios & Defaults
@@ -105,6 +114,8 @@ class Dashboard:
         self,
         algorithm: str = 'neat',
         num_envs: int = 1,
+        display_mode: str = 'single',
+        game_type: str = 'generic',
         graph_update_interval: int = 1,
         fps_cap: int = 60,
         recorder=None,
@@ -136,6 +147,7 @@ class Dashboard:
         # Configuration (stored before layout calc so _rebuild uses them)
         self.algorithm = algorithm
         self.num_envs = num_envs
+        self.game_type = game_type  # 'grid', 'sidescroller', 'board', 'generic'
         self.graph_update_interval = graph_update_interval
         self.fps_cap = fps_cap
         self.recorder = recorder
@@ -143,6 +155,15 @@ class Dashboard:
         self.stream_manager = stream_manager
         self.overlay_manager = overlay_manager
         self.metrics = MetricsTracker()
+
+        # Display mode: 'single' | 'grid' | 'swarm'
+        # Auto-select: multi-env defaults to 'grid', single-env to 'single'
+        if display_mode == 'auto':
+            self._display_mode = 'grid' if num_envs > 1 else 'single'
+        else:
+            self._display_mode = display_mode
+        # Hotkey overlay state
+        self._show_hotkey_overlay = False
 
         # Compute initial layout dimensions from default size
         self.window_width = DEFAULT_WIDTH
@@ -160,18 +181,8 @@ class Dashboard:
             pygame.DOUBLEBUF | pygame.HWSURFACE | pygame.RESIZABLE,
         )
 
-        # Create sub-components at initial size
-        if num_envs > 1:
-            self.game_renderer = GridRenderer(
-                width=self.game_panel_width,
-                height=self.content_height,
-                num_envs=num_envs,
-            )
-        else:
-            self.game_renderer = GameRenderer(
-                width=self.game_panel_width,
-                height=self.content_height,
-            )
+        # Create game renderer based on display mode
+        self.game_renderer = self._create_renderer()
 
         self.graph_panel = GraphPanel(
             width=self.graph_panel_width,
@@ -200,6 +211,9 @@ class Dashboard:
 
         # Training target for progress bar (set via set_training_target())
         self._training_target = 0
+
+        # Help overlay state (toggled with ? or H)
+        self._show_help_overlay = False
 
         # Initialize fonts
         self._title_font = None
@@ -250,6 +264,64 @@ class Dashboard:
         self.content_height = (
             self.window_height - self.top_bar_height - self.bottom_bar_height
         )
+
+    def _create_renderer(self):
+        """Create the appropriate game renderer for the current display mode.
+
+        Returns a GameRenderer, GridRenderer, or SwarmRenderer depending
+        on ``self._display_mode`` and ``self.num_envs``.
+        """
+        w = self.game_panel_width
+        h = self.content_height
+
+        if self._display_mode == 'swarm' and self.num_envs > 1 and HAS_SWARM:
+            return SwarmRenderer(
+                width=w, height=h,
+                num_envs=self.num_envs,
+                game_type=self.game_type,
+            )
+        elif self._display_mode == 'grid' and self.num_envs > 1:
+            return GridRenderer(
+                width=w, height=h,
+                num_envs=self.num_envs,
+            )
+        else:
+            return GameRenderer(width=w, height=h)
+
+    @property
+    def display_mode(self) -> str:
+        """Current display mode: 'single', 'grid', or 'swarm'."""
+        return self._display_mode
+
+    def cycle_display_mode(self) -> str:
+        """Cycle to the next display mode and rebuild the renderer.
+
+        Skips 'grid' and 'swarm' when only 1 env is active (they need
+        multiple environments to be meaningful). Skips 'swarm' when the
+        SwarmRenderer module is not available.
+
+        Returns:
+            The new display mode string.
+        """
+        idx = DISPLAY_MODES.index(self._display_mode) if \
+            self._display_mode in DISPLAY_MODES else 0
+
+        # Try each subsequent mode until we find a valid one
+        for _ in range(len(DISPLAY_MODES)):
+            idx = (idx + 1) % len(DISPLAY_MODES)
+            candidate = DISPLAY_MODES[idx]
+            if candidate in ('grid', 'swarm') and self.num_envs <= 1:
+                continue
+            if candidate == 'swarm' and not HAS_SWARM:
+                continue
+            break
+
+        self._display_mode = DISPLAY_MODES[idx]
+        self.game_renderer = self._create_renderer()
+        mode_labels = {'single': 'Single', 'grid': 'Tiled Grid',
+                       'swarm': 'Swarm / Ghost'}
+        print(f'  Display mode: {mode_labels.get(self._display_mode, self._display_mode)}')
+        return self._display_mode
 
     def _rebuild_components(self) -> None:
         """
@@ -474,6 +546,10 @@ class Dashboard:
         if self.is_paused:
             self._draw_pause_overlay()
 
+        # Help overlay
+        if self._show_help_overlay:
+            self._draw_help_overlay()
+
         # Capture frame for video recording (before flip)
         if self.recorder is not None:
             self.recorder.capture_frame(self.screen)
@@ -494,17 +570,21 @@ class Dashboard:
         self,
         frames: Optional[list] = None,
         metrics: Optional[Dict[str, Any]] = None,
+        infos: Optional[list] = None,
     ) -> None:
         """
-        Update the dashboard with multiple game frames (grid mode).
+        Update the dashboard with multiple game frames (grid/swarm mode).
 
         Similar to update() but accepts a list of frames for the
-        multi-env grid display. Only works when num_envs > 1.
+        multi-env display. Works with GridRenderer (tiled) and
+        SwarmRenderer (ghost overlay).
 
         Args:
             frames: List of game frames (numpy arrays), one per env.
                     Can be None or shorter than num_envs.
             metrics: Dictionary of metric values to record.
+            infos: Optional list of info dicts from each env (used by
+                   SwarmRenderer for side-scroller x_pos offsets).
         """
         # Record metrics (same as single-env update)
         is_graph_update = False
@@ -520,29 +600,34 @@ class Dashboard:
         # Draw the background
         self._draw_background()
 
-        # Render game frames in the grid
-        if frames is not None and isinstance(self.game_renderer, GridRenderer):
+        # Render game frames using the active renderer
+        panel_x, panel_y = 0, self.top_bar_height
+        if frames is not None and hasattr(self.game_renderer, 'render_frames'):
+            # GridRenderer or SwarmRenderer — pass all frames
+            kwargs = {'panel_x': panel_x, 'panel_y': panel_y}
+            if HAS_SWARM and isinstance(self.game_renderer, SwarmRenderer):
+                kwargs['infos'] = infos
             self.game_renderer.render_frames(
-                self.screen, frames,
-                panel_x=0, panel_y=self.top_bar_height,
+                self.screen, frames, **kwargs,
             )
         elif frames is not None and len(frames) > 0:
-            # Fallback for single renderer: use first frame
+            # Single-frame renderer: show first frame
             self.game_renderer.render_frame(
                 self.screen, frames[0],
-                panel_x=0, panel_y=self.top_bar_height,
+                panel_x=panel_x, panel_y=panel_y,
             )
         elif self.game_renderer.last_frame is not None:
-            # Re-render last known frames
-            if isinstance(self.game_renderer, GridRenderer):
+            # Re-render last known data
+            if hasattr(self.game_renderer, 'render_frames') and \
+               hasattr(self.game_renderer, 'last_frames'):
                 self.game_renderer.render_frames(
                     self.screen, self.game_renderer.last_frames,
-                    panel_x=0, panel_y=self.top_bar_height,
+                    panel_x=panel_x, panel_y=panel_y,
                 )
             else:
                 self.game_renderer.render_frame(
                     self.screen, self.game_renderer.last_frame,
-                    panel_x=0, panel_y=self.top_bar_height,
+                    panel_x=panel_x, panel_y=panel_y,
                 )
 
         # Update and render graphs
@@ -582,6 +667,9 @@ class Dashboard:
 
         if self.is_paused:
             self._draw_pause_overlay()
+
+        if self._show_help_overlay:
+            self._draw_help_overlay()
 
         # Capture frame for video recording (before flip)
         if self.recorder is not None:
@@ -657,6 +745,11 @@ class Dashboard:
                     self.music_manager.handle_music_end_event()
 
             elif event.type == pygame.KEYDOWN:
+                # If help overlay is showing, any key dismisses it
+                if self._show_help_overlay:
+                    self._show_help_overlay = False
+                    continue
+
                 if event.key == pygame.K_ESCAPE:
                     return False
                 elif event.key == pygame.K_SPACE:
@@ -679,6 +772,14 @@ class Dashboard:
                 elif event.key == pygame.K_DOWN:
                     if self.music_manager:
                         self.music_manager.volume_down()
+                elif event.key == pygame.K_v:
+                    self.cycle_display_mode()
+                elif event.key == pygame.K_h:
+                    self._show_help_overlay = True
+                elif (event.key == pygame.K_SLASH
+                      and (event.mod & pygame.KMOD_SHIFT)):
+                    # Shift+/ = '?' on US keyboards
+                    self._show_help_overlay = True
         return True
 
     def get_surface(self) -> pygame.Surface:
@@ -866,6 +967,52 @@ class Dashboard:
         text_x = (self.window_width - pause_text.get_width()) // 2
         text_y = (self.window_height - pause_text.get_height()) // 2
         self.screen.blit(pause_text, (text_x, text_y))
+
+    def _draw_help_overlay(self) -> None:
+        """Draw a semi-transparent help overlay showing keyboard shortcuts."""
+        overlay_w = int(self.window_width * 0.6)
+        overlay_h = int(self.window_height * 0.6)
+        overlay_x = (self.window_width - overlay_w) // 2
+        overlay_y = (self.window_height - overlay_h) // 2
+
+        overlay = pygame.Surface((overlay_w, overlay_h), pygame.SRCALPHA)
+        overlay.fill((0, 0, 0, 180))
+        self.screen.blit(overlay, (overlay_x, overlay_y))
+
+        title = self._title_font.render('Keyboard Shortcuts', True, ACCENT_COLOR)
+        title_x = overlay_x + (overlay_w - title.get_width()) // 2
+        title_y = overlay_y + 20
+        self.screen.blit(title, (title_x, title_y))
+
+        shortcuts = [
+            ('SPACE', 'Pause / Resume'),
+            ('ESC', 'Stop Training'),
+            ('M', 'Mute / Unmute'),
+            ('+  /  -', 'Volume Up / Down'),
+            ('N', 'Next Track'),
+            ('V', 'Cycle Display Mode'),
+            ('R', 'Toggle Recording'),
+            ('?  or  H', 'Show / Hide Help'),
+        ]
+
+        start_y = title_y + title.get_height() + 25
+        row_height = int(max(24, overlay_h * 0.065))
+        col_key_x = overlay_x + int(overlay_w * 0.15)
+        col_desc_x = overlay_x + int(overlay_w * 0.45)
+
+        for i, (key, desc) in enumerate(shortcuts):
+            y = start_y + i * row_height
+            key_surface = self._status_font.render(key, True, ACCENT_COLOR)
+            desc_surface = self._status_font.render(desc, True, TEXT_COLOR)
+            self.screen.blit(key_surface, (col_key_x, y))
+            self.screen.blit(desc_surface, (col_desc_x, y))
+
+        hint = self._label_font.render(
+            'Press any key to dismiss', True, DIM_TEXT_COLOR,
+        )
+        hint_x = overlay_x + (overlay_w - hint.get_width()) // 2
+        hint_y = overlay_y + overlay_h - hint.get_height() - 15
+        self.screen.blit(hint, (hint_x, hint_y))
 
     def _update_fps(self) -> None:
         """Calculate and update the displayed FPS value."""

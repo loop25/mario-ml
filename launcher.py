@@ -26,13 +26,15 @@ Requirements:
 """
 
 import os
+import re
+import shutil
 import sys
 import json
 import signal
 import subprocess
 import time
 import tkinter as tk
-from tkinter import ttk, filedialog
+from tkinter import ttk, filedialog, messagebox, simpledialog
 
 from games.registry import GameRegistry
 
@@ -77,6 +79,16 @@ ACCENT_BLUE = "#4da6ff"    # PPO color
 ACCENT_ORANGE = "#ff8c42"  # DQN color
 ACCENT_RED = "#ff4757"     # Stop button
 BORDER_COLOR = "#2a2a4a"   # Subtle borders
+
+# Training duration presets (preset_name -> episode count)
+TRAINING_PRESETS = {
+    "Quick Demo": "100",
+    "Standard": "5000",
+    "Deep Training": "25000",
+    "Overnight": "50000",
+    "Custom": "",
+}
+PRESET_NAMES = list(TRAINING_PRESETS.keys())
 
 # Algorithm-specific accent colors, file extensions, and user-facing info
 ALGO_INFO = {
@@ -190,7 +202,8 @@ DEFAULT_SETTINGS = {
     "algorithm": "neat",
     "game_index": 0,
     "device": "auto",
-    "duration": "",
+    "duration": "5000",
+    "duration_preset": "Standard",
     "visualize": True,
     "record": False,
     "eval_mode": False,
@@ -238,7 +251,8 @@ class MarioLauncher:
         self.selected_algo = tk.StringVar(value="neat")
         self.world_var = tk.StringVar(value="1")
         self.stage_var = tk.StringVar(value="1")
-        self.duration_var = tk.StringVar(value="")
+        self.duration_var = tk.StringVar(value="5000")
+        self.preset_var = tk.StringVar(value="Standard")
         self.visualize_var = tk.BooleanVar(value=True)
         self.record_var = tk.BooleanVar(value=False)
         self.eval_var = tk.BooleanVar(value=False)
@@ -328,6 +342,8 @@ class MarioLauncher:
         self.selected_algo.set(settings['algorithm'])
         self.device_var.set(settings['device'])
         self.duration_var.set(settings['duration'])
+        self.preset_var.set(settings.get('duration_preset', 'Standard'))
+        self._on_preset_changed()
         self.visualize_var.set(settings['visualize'])
         self.record_var.set(settings['record'])
         self.eval_var.set(settings['eval_mode'])
@@ -376,6 +392,7 @@ class MarioLauncher:
             'game_index': game_idx,
             'device': self.device_var.get(),
             'duration': self.duration_var.get(),
+            'duration_preset': self.preset_var.get(),
             'visualize': self.visualize_var.get(),
             'record': self.record_var.get(),
             'eval_mode': self.eval_var.get(),
@@ -414,7 +431,7 @@ class MarioLauncher:
         """Register trace callbacks on all tk variables for auto-save."""
         for var in [
             self.selected_algo, self.world_var, self.stage_var,
-            self.duration_var, self.visualize_var, self.record_var,
+            self.duration_var, self.preset_var, self.visualize_var, self.record_var,
             self.eval_var, self.next_stage_var, self.curriculum_var,
             self.num_envs_var, self.model_path_var, self.device_var,
             self.stream_var, self.twitch_key_var, self.youtube_key_var,
@@ -638,7 +655,7 @@ class MarioLauncher:
 
         # ── Duration entry ─────────────────────────────────────────────
         self.duration_label = tk.Label(
-            parent, text="Generations",
+            parent, text="TRAINING DURATION",
             font=("Segoe UI", 8, "bold"), fg=TEXT_DIM, bg=BG_DARK,
         )
         self.duration_label.pack(anchor="w")
@@ -646,17 +663,29 @@ class MarioLauncher:
         dur_row = tk.Frame(parent, bg=BG_DARK)
         dur_row.pack(fill="x", pady=(3, 0))
 
+        self.preset_combo = ttk.Combobox(
+            dur_row, textvariable=self.preset_var,
+            values=PRESET_NAMES, state="readonly",
+            font=("Segoe UI", 11), width=15,
+        )
+        self.preset_combo.pack(side="left")
+        self.preset_combo.bind("<<ComboboxSelected>>", self._on_preset_changed)
+
         self.duration_entry = tk.Entry(
             dur_row, textvariable=self.duration_var,
             font=("Segoe UI", 11), bg=BG_LIGHT, fg=TEXT_PRIMARY,
-            insertbackground=TEXT_PRIMARY, relief="flat", width=12,
+            insertbackground=TEXT_PRIMARY, relief="flat", width=10,
         )
-        self.duration_entry.pack(side="left")
-        tk.Label(
-            dur_row, text="(blank = default)",
-            font=("Segoe UI", 8), fg=TEXT_DIM, bg=BG_DARK,
-        ).pack(side="left", padx=(8, 0))
+        self.duration_entry.pack(side="left", padx=(8, 0))
 
+        self.duration_unit_label = tk.Label(
+            dur_row, text="episodes",
+            font=("Segoe UI", 8), fg=TEXT_DIM, bg=BG_DARK,
+        )
+        self.duration_unit_label.pack(side="left", padx=(6, 0))
+
+        # Apply initial preset state
+        self._on_preset_changed()
         self._update_duration_label()
 
     def _build_right_column(self, parent):
@@ -878,6 +907,7 @@ class MarioLauncher:
             ("Open Models Folder",     lambda: self._open_folder(MODELS_DIR)),
             ("Open Recordings Folder", lambda: self._open_folder(RECORDINGS_DIR)),
             ("Compare Runs",           self._open_comparison),
+            ("Add Game...",            self._add_game_wizard),
         ]:
             tk.Button(
                 right_col, text=label,
@@ -1133,10 +1163,22 @@ class MarioLauncher:
                     state="normal",
                 )
 
+    def _on_preset_changed(self, event=None):
+        """Handle training preset selection change."""
+        preset = self.preset_var.get()
+        if preset == "Custom":
+            # Enable manual entry, clear if it held a preset value
+            self.duration_entry.configure(state="normal")
+        else:
+            value = TRAINING_PRESETS.get(preset, "")
+            self.duration_var.set(value)
+            self.duration_entry.configure(state="readonly")
+
     def _update_duration_label(self):
-        """Update the duration label text when algorithm changes."""
+        """Update the duration unit label text when algorithm changes."""
         algo = self.selected_algo.get()
-        self.duration_label.configure(text=ALGO_INFO[algo]["duration_label"])
+        label = ALGO_INFO[algo]["duration_label"]
+        self.duration_unit_label.configure(text=label)
 
     def _on_eval_toggle(self):
         """Update UI when Evaluation Mode is toggled."""
@@ -1207,6 +1249,63 @@ class MarioLauncher:
             )
         except ImportError as e:
             self._set_status(f"Comparison panel error: {e}", ACCENT_RED)
+
+    def _add_game_wizard(self):
+        """Open a dialog to create a new user game from the template."""
+        raw_name = simpledialog.askstring(
+            "Add Game",
+            "Enter a name for your new game:\n"
+            "(e.g. 'My Platformer', 'Space Invaders')",
+            parent=self.root,
+        )
+        if not raw_name or not raw_name.strip():
+            return
+
+        # Sanitize: lowercase, underscores, no special chars
+        sanitized = re.sub(r'[^a-z0-9_]', '_', raw_name.strip().lower())
+        sanitized = re.sub(r'_+', '_', sanitized).strip('_')
+        if not sanitized:
+            messagebox.showerror("Invalid Name", "Could not create a valid game name.")
+            return
+
+        template_dir = os.path.join(PROJECT_ROOT, "games", "user", "_template")
+        dest_dir = os.path.join(PROJECT_ROOT, "games", "user", sanitized)
+
+        if os.path.exists(dest_dir):
+            messagebox.showwarning(
+                "Already Exists",
+                f"A game called '{sanitized}' already exists at:\n{dest_dir}",
+            )
+            return
+
+        # Copy template to new directory
+        try:
+            shutil.copytree(template_dir, dest_dir)
+        except Exception as e:
+            messagebox.showerror("Error", f"Failed to create game directory:\n{e}")
+            return
+
+        # Open the new folder in file explorer
+        try:
+            if sys.platform == "win32":
+                os.startfile(dest_dir)
+            elif sys.platform == "darwin":
+                subprocess.run(["open", dest_dir])
+            else:
+                subprocess.run(["xdg-open", dest_dir])
+        except Exception:
+            pass
+
+        messagebox.showinfo(
+            "Game Created",
+            f"New game '{sanitized}' created!\n\n"
+            f"Location: {dest_dir}\n\n"
+            "Next steps:\n"
+            "1. Edit game.py to implement your game logic\n"
+            "2. Edit adapter.py to configure the adapter\n"
+            "3. Update game_id to match your folder name\n"
+            "4. Restart the launcher to see your game",
+        )
 
     def _import_rom(self):
         """Open a directory picker and run retro.import to register ROMs."""

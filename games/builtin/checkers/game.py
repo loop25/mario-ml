@@ -235,76 +235,151 @@ class CheckersEnv(gym.Env):
     DISPLAY_SIZE = 480
 
     def _render_rgb(self) -> np.ndarray:
-        """Render a polished checkers board for dashboard display.
+        """Render a polished checkers board for dashboard/stream display.
 
-        Renders at 480px. Rich wood-toned board with 3D pieces —
-        dark pieces with gray highlights, red pieces with warm tones,
-        golden crown rings for kings.
+        Classic dark-green and cream board with a dark wooden frame,
+        3D-shaded red and black pieces with gradient highlights, and
+        gold crown symbols for kings. Score overlay shows piece counts.
         """
         import math
 
         size = self.DISPLAY_SIZE
-        cell = size // 8  # 60px per cell
-        img = np.zeros((size, size, 3), dtype=np.uint8)
+        border = 10  # Dark wooden frame thickness
+        inner = size - 2 * border
+        cell = inner // 8
+        inner = cell * 8  # Snap to exact multiple
+        total = inner + 2 * border
+        img = np.zeros((total, total, 3), dtype=np.uint8)
+        img[:] = (20, 15, 10)  # Dark background
 
-        # Draw board squares with richer colors
+        # Board colors
+        CREAM = (220, 210, 185)
+        GREEN = (30, 80, 30)
+
+        # Draw board squares
         for r in range(8):
             for c in range(8):
-                x1, y1 = c * cell, r * cell
+                x1 = border + c * cell
+                y1 = border + r * cell
                 x2, y2 = x1 + cell, y1 + cell
                 if (r + c) % 2 == 0:
-                    img[y1:y2, x1:x2] = (220, 205, 170)  # Warm cream
+                    img[y1:y2, x1:x2] = CREAM
                 else:
-                    img[y1:y2, x1:x2] = (55, 95, 55)      # Forest green
+                    img[y1:y2, x1:x2] = GREEN
 
-        # Draw pieces with 3D shading
+        # Dark wooden frame border
+        cv2.rectangle(img, (0, 0), (total - 1, total - 1),
+                      (60, 40, 20), border)
+        # Inner highlight line
+        cv2.rectangle(img, (border - 1, border - 1),
+                      (border + inner, border + inner),
+                      (90, 65, 35), 1)
+
+        # Draw pieces with 3D gradient shading
         radius = max(6, cell // 2 - 6)
 
         for pos in range(NUM_SQUARES):
             r, c = _pos_to_rc(pos)
-            cx = c * cell + cell // 2
-            cy = r * cell + cell // 2
+            cx = border + c * cell + cell // 2
+            cy = border + r * cell + cell // 2
             piece = self.board[pos]
 
             if piece == EMPTY:
                 continue
 
-            if piece in (P1_MAN, P1_KING):
-                # Dark piece: charcoal with 3D shading
-                cv2.circle(img, (cx + 2, cy + 2), radius, (20, 20, 20),
-                           -1, cv2.LINE_AA)  # Shadow
-                cv2.circle(img, (cx, cy), radius, (50, 48, 48),
-                           -1, cv2.LINE_AA)  # Base
-                cv2.circle(img, (cx, cy), radius, (75, 72, 72),
-                           2, cv2.LINE_AA)    # Edge ring
-                # Highlight
-                hl_r = max(3, radius // 3)
-                cv2.circle(img, (cx - radius // 4, cy - radius // 4),
-                           hl_r, (90, 88, 88), -1, cv2.LINE_AA)
+            if piece in (P2_MAN, P2_KING):
+                # Red piece
+                base_color = (200, 50, 50)
+                shadow_color = (100, 20, 20)
+                highlight_color = (240, 130, 120)
+                edge_color = (230, 80, 70)
+                dark_edge = (140, 30, 25)
             else:
-                # Red piece: crimson with 3D shading
-                cv2.circle(img, (cx + 2, cy + 2), radius, (80, 15, 15),
-                           -1, cv2.LINE_AA)  # Shadow
-                cv2.circle(img, (cx, cy), radius, (190, 45, 40),
-                           -1, cv2.LINE_AA)  # Base
-                cv2.circle(img, (cx, cy), radius, (220, 80, 75),
-                           2, cv2.LINE_AA)    # Edge ring
-                # Highlight
-                hl_r = max(3, radius // 3)
-                cv2.circle(img, (cx - radius // 4, cy - radius // 4),
-                           hl_r, (240, 120, 115), -1, cv2.LINE_AA)
+                # Black piece
+                base_color = (50, 50, 50)
+                shadow_color = (20, 20, 20)
+                highlight_color = (100, 100, 100)
+                edge_color = (80, 80, 80)
+                dark_edge = (30, 30, 30)
 
-            # Golden crown ring for kings
+            # Drop shadow (offset down-right)
+            cv2.circle(img, (cx + 2, cy + 3), radius, shadow_color,
+                       -1, cv2.LINE_AA)
+
+            # Base circle
+            cv2.circle(img, (cx, cy), radius, base_color,
+                       -1, cv2.LINE_AA)
+
+            # 3D gradient effect: darker bottom-right arc
+            cv2.ellipse(img, (cx + 1, cy + 1), (radius - 1, radius - 1),
+                        0, 30, 210, dark_edge, 2, cv2.LINE_AA)
+
+            # Lighter top-left highlight arc
+            cv2.ellipse(img, (cx - 1, cy - 1), (radius - 2, radius - 2),
+                        0, 200, 350, highlight_color, 2, cv2.LINE_AA)
+
+            # Specular highlight (top-left blob)
+            hl_r = max(3, radius // 3)
+            cv2.circle(img, (cx - radius // 4, cy - radius // 4),
+                       hl_r, highlight_color, -1, cv2.LINE_AA)
+
+            # Edge ring
+            cv2.circle(img, (cx, cy), radius, edge_color,
+                       1, cv2.LINE_AA)
+
+            # King: gold crown/star symbol
             if piece in (P1_KING, P2_KING):
+                gold = (220, 180, 50)
+                gold_bright = (255, 220, 60)
                 crown_r = max(4, radius * 2 // 3)
-                cv2.circle(img, (cx, cy), crown_r, (210, 190, 50),
+                # Crown ring
+                cv2.circle(img, (cx, cy), crown_r, gold,
                            2, cv2.LINE_AA)
-                # Small crown dots
-                for angle_deg in (-30, 0, 30):
-                    ax = int(cx + crown_r * 0.6 * math.cos(math.radians(angle_deg - 90)))
-                    ay = int(cy + crown_r * 0.6 * math.sin(math.radians(angle_deg - 90)))
-                    cv2.circle(img, (ax, ay), 2, (255, 220, 60),
-                               -1, cv2.LINE_AA)
+                # Star points (5-pointed)
+                for i in range(5):
+                    angle = math.radians(i * 72 - 90)
+                    px = int(cx + crown_r * 0.55 * math.cos(angle))
+                    py = int(cy + crown_r * 0.55 * math.sin(angle))
+                    cv2.circle(img, (px, py), max(1, radius // 8),
+                               gold_bright, -1, cv2.LINE_AA)
+                # Center dot
+                cv2.circle(img, (cx, cy), max(1, radius // 6),
+                           gold_bright, -1, cv2.LINE_AA)
+
+        # Score overlay — piece counts
+        p1_count = sum(1 for p in self.board if p in (P1_MAN, P1_KING))
+        p2_count = sum(1 for p in self.board if p in (P2_MAN, P2_KING))
+        font = cv2.FONT_HERSHEY_SIMPLEX
+
+        # Dark pieces count (top-left)
+        dark_text = f"Dark: {p1_count}"
+        cv2.rectangle(img, (border, border),
+                      (border + 88, border + 22), (20, 15, 10), -1)
+        cv2.putText(img, dark_text, (border + 4, border + 16),
+                    font, 0.45, (180, 180, 180), 1, cv2.LINE_AA)
+
+        # Red pieces count (top-right)
+        red_text = f"Red: {p2_count}"
+        tw = cv2.getTextSize(red_text, font, 0.45, 1)[0][0]
+        rx = border + inner - tw - 8
+        cv2.rectangle(img, (rx - 4, border),
+                      (border + inner, border + 22), (20, 15, 10), -1)
+        cv2.putText(img, red_text, (rx, border + 16),
+                    font, 0.45, (220, 100, 90), 1, cv2.LINE_AA)
+
+        # Move counter (bottom-center)
+        move_text = f"Move {self._moves_played}"
+        mtw = cv2.getTextSize(move_text, font, 0.40, 1)[0][0]
+        mx = total // 2 - mtw // 2
+        my = border + inner - 4
+        cv2.rectangle(img, (mx - 4, my - 14), (mx + mtw + 4, my + 4),
+                      (20, 15, 10), -1)
+        cv2.putText(img, move_text, (mx, my),
+                    font, 0.40, (160, 150, 130), 1, cv2.LINE_AA)
+
+        # Resize to exact DISPLAY_SIZE if frame differs
+        if total != size:
+            img = cv2.resize(img, (size, size), interpolation=cv2.INTER_AREA)
 
         return img
 

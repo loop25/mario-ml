@@ -303,6 +303,194 @@ class SnakeEnv(gym.Env):
         """Render as RGB for dashboard display."""
         return self._render_rgb()
 
+    # ------------------------------------------------------------------
+    # Swarm / ghost rendering
+    # ------------------------------------------------------------------
+
+    # Default palette: agent 0 = lime green, then HSV-spaced hues
+    _SWARM_COLORS = [
+        (60, 255, 60),    # 0  lime green (matches default snake)
+        (0, 220, 255),    # 1  cyan
+        (255, 60, 220),   # 2  magenta
+        (255, 180, 30),   # 3  orange
+        (160, 80, 255),   # 4  purple
+        (255, 255, 60),   # 5  yellow
+        (60, 180, 255),   # 6  sky blue
+        (255, 100, 100),  # 7  coral
+    ]
+
+    @classmethod
+    def _swarm_color(cls, agent_idx: int) -> tuple:
+        """Return the color for a given agent index."""
+        import colorsys
+        if agent_idx < len(cls._SWARM_COLORS):
+            return cls._SWARM_COLORS[agent_idx]
+        # Fall back to HSV wheel for large swarms
+        hue = (0.3 + agent_idx * 0.618033988749895) % 1.0  # golden ratio
+        r, g, b = colorsys.hsv_to_rgb(hue, 0.9, 1.0)
+        return (int(r * 255), int(g * 255), int(b * 255))
+
+    @staticmethod
+    def _dim(color: tuple, factor: float = 0.35) -> tuple:
+        return (int(color[0] * factor),
+                int(color[1] * factor),
+                int(color[2] * factor))
+
+    def render_swarm(
+        self,
+        all_snakes: list,
+        all_foods: list,
+        scores: list = None,
+    ) -> np.ndarray:
+        """Render multiple snakes on the same grid (ghost / swarm mode).
+
+        Each snake gets a unique color from the HSV palette.  Dead snakes
+        (empty body lists) are silently skipped.
+
+        Args:
+            all_snakes: List of snake body lists.  Each body is a list of
+                        ``(row, col)`` tuples ordered head-first.
+            all_foods:  List of food positions ``(row, col)`` or ``None``,
+                        one per snake.
+            scores:     Optional list of scores (ints).  The *best* score
+                        is shown in the overlay.
+
+        Returns:
+            An RGB numpy array of shape ``(img_size, img_size, 3)``.
+        """
+        size = self.DISPLAY_SIZE
+        cell = size // self.grid_size
+        img_size = cell * self.grid_size
+        img = np.zeros((img_size, img_size, 3), dtype=np.uint8)
+
+        # Black background
+        img[:] = (10, 10, 10)
+
+        # Grid lines
+        for i in range(1, self.grid_size):
+            pos = i * cell
+            cv2.line(img, (pos, 0), (pos, img_size), (35, 35, 35), 1)
+            cv2.line(img, (0, pos), (img_size, pos), (35, 35, 35), 1)
+
+        half = cell // 2
+        thick = cell // 2 - 2
+
+        num_agents = len(all_snakes)
+
+        # --- Draw each snake ---
+        for agent_idx in range(num_agents):
+            snake = all_snakes[agent_idx]
+            if not snake:
+                continue  # dead / empty — skip
+
+            color = self._swarm_color(agent_idx)
+            n = len(snake)
+
+            # Segment color gradient (bright head, dimmer tail)
+            def seg_color(seg_i):
+                t = 1.0 - seg_i / max(n, 1)
+                return (
+                    int(color[0] * (0.45 + 0.55 * t)),
+                    int(color[1] * (0.45 + 0.55 * t)),
+                    int(color[2] * (0.45 + 0.55 * t)),
+                )
+
+            # Connected body rectangles (tail to head)
+            for i in range(n - 1, 0, -1):
+                r1, c1 = snake[i]
+                r2, c2 = snake[i - 1]
+                cx1, cy1 = c1 * cell + half, r1 * cell + half
+                cx2, cy2 = c2 * cell + half, r2 * cell + half
+                sc = seg_color(i - 1)
+                if r1 == r2:
+                    mn, mx = min(cx1, cx2), max(cx1, cx2)
+                    cv2.rectangle(img, (mn, cy1 - thick),
+                                  (mx, cy1 + thick), sc, -1)
+                elif c1 == c2:
+                    mn, mx = min(cy1, cy2), max(cy1, cy2)
+                    cv2.rectangle(img, (cx1 - thick, mn),
+                                  (cx1 + thick, mx), sc, -1)
+
+            # Rounded joints
+            for i in range(n - 1, -1, -1):
+                r, c = snake[i]
+                cx, cy = c * cell + half, r * cell + half
+                cv2.circle(img, (cx, cy), thick, seg_color(i), -1,
+                           cv2.LINE_AA)
+
+            # Outline for definition
+            outline = self._dim(color, 0.25)
+            for i in range(n - 1, -1, -1):
+                r, c = snake[i]
+                cx, cy = c * cell + half, r * cell + half
+                cv2.circle(img, (cx, cy), thick, outline, 1, cv2.LINE_AA)
+
+            # Head circle (slightly larger, brighter)
+            hr, hc = snake[0]
+            hcx, hcy = hc * cell + half, hr * cell + half
+            head_r = thick + 3
+            cv2.circle(img, (hcx, hcy), head_r, color, -1, cv2.LINE_AA)
+            cv2.circle(img, (hcx, hcy), head_r, self._dim(color, 0.5),
+                       2, cv2.LINE_AA)
+
+            # Eyes (use direction from agent 0 for simplicity; others
+            # get a default right-facing look)
+            direction = self.direction if agent_idx == 0 else 1
+            dr, dc = self._directions[direction]
+            eye_off = cell // 4
+            eye_r = max(3, cell // 6)
+            pupil_r = max(2, cell // 10)
+            for side in (-1, 1):
+                ex = hcx + dc * eye_off + (-dr) * side * (cell // 4)
+                ey = hcy + dr * eye_off + dc * side * (cell // 4)
+                cv2.circle(img, (ex, ey), eye_r, (255, 255, 255), -1,
+                           cv2.LINE_AA)
+                cv2.circle(img, (ex + dc * 2, ey + dr * 2), pupil_r,
+                           (10, 10, 10), -1, cv2.LINE_AA)
+
+        # --- Draw food for each agent (dimmer version of agent color) ---
+        for agent_idx in range(num_agents):
+            if agent_idx >= len(all_foods):
+                continue
+            food = all_foods[agent_idx]
+            if food is None:
+                continue
+            fc_color = self._dim(self._swarm_color(agent_idx), 0.55)
+            fr, fcc = food
+            fcy = fr * cell + half
+            fcx = fcc * cell + half
+            food_r = cell // 2 - 2
+            cv2.circle(img, (fcx, fcy), food_r, fc_color, -1, cv2.LINE_AA)
+            # Small bright center dot
+            cv2.circle(img, (fcx, fcy), max(2, food_r // 3),
+                       self._swarm_color(agent_idx), -1, cv2.LINE_AA)
+
+        # Border
+        cv2.rectangle(img, (0, 0), (img_size - 1, img_size - 1),
+                      (30, 140, 30), 3)
+
+        # Score overlay — show best score
+        best_score = 0
+        if scores:
+            best_score = max(scores)
+        score_text = f"Best: {best_score}"
+        font = cv2.FONT_HERSHEY_SIMPLEX
+        text_w = cv2.getTextSize(score_text, font, 0.6, 2)[0][0]
+        tx = img_size - text_w - 12
+        cv2.rectangle(img, (tx - 4, 2), (img_size - 4, 28),
+                      (10, 10, 10), -1)
+        cv2.putText(img, score_text, (tx, 22), font, 0.6,
+                    (60, 255, 60), 2, cv2.LINE_AA)
+
+        # Agent count
+        alive = sum(1 for s in all_snakes if s)
+        count_text = f"Agents: {alive}/{num_agents}"
+        cv2.rectangle(img, (4, 2), (160, 28), (10, 10, 10), -1)
+        cv2.putText(img, count_text, (8, 22), font, 0.6,
+                    (60, 255, 60), 2, cv2.LINE_AA)
+
+        return img
+
     def _info(self) -> dict:
         return {
             'score': self._score,

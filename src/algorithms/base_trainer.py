@@ -323,17 +323,20 @@ class BaseTrainer(ABC):
         self,
         frames: Optional[list] = None,
         metrics: Optional[Dict[str, Any]] = None,
+        infos: Optional[list] = None,
     ) -> bool:
         """
-        Send multiple game frames to the dashboard grid display.
+        Send multiple game frames to the dashboard grid/swarm display.
 
         Used when running multiple environments in parallel. Falls back
         to single-frame update_visualization if the dashboard doesn't
-        support grid mode.
+        support grid mode. When in swarm mode, ``infos`` is forwarded
+        so the SwarmRenderer can use x_pos offsets for side-scrollers.
 
         Args:
             frames: List of game frames (numpy arrays), one per env.
             metrics: Dictionary of metric values to display.
+            infos: Optional info dicts from each env (for swarm renderer).
 
         Returns:
             bool: True to continue, False if dashboard was closed.
@@ -346,7 +349,9 @@ class BaseTrainer(ABC):
 
         try:
             if hasattr(self.visualizer, 'update_grid'):
-                self.visualizer.update_grid(frames=frames, metrics=metrics)
+                self.visualizer.update_grid(
+                    frames=frames, metrics=metrics, infos=infos,
+                )
             elif frames and len(frames) > 0:
                 # Fallback: use first frame
                 self.visualizer.update(frame=frames[0], metrics=metrics)

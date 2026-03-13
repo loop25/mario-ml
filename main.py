@@ -43,6 +43,7 @@ Environment:
 
 import argparse
 import os
+import random
 import sys
 import json
 import yaml
@@ -563,10 +564,12 @@ def main():
         from src.streaming.overlay_manager import OverlayManager
 
         # Pass full music playlist to stream (ffmpeg will loop through all
-        # tracks using its concat demuxer — independent of pygame playback)
+        # tracks using its concat demuxer — independent of pygame playback).
+        # Shuffle so the stream gets tracks in random order, not alphabetical.
         audio_files = []
         if music_manager and music_manager.playlist:
-            audio_files = music_manager.playlist
+            audio_files = list(music_manager.playlist)  # copy
+            random.shuffle(audio_files)
 
         stream_manager = StreamManager(
             twitch_key=twitch_key,
