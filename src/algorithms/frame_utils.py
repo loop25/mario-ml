@@ -9,7 +9,8 @@ depends on the environment type:
         env.unwrapped.screen  →  240×256 RGB numpy array
 
     Built-in games (Chess, Snake, Connect4, etc.):
-        env.render(mode='rgb_array')  →  480×480 RGB numpy array
+        env.unwrapped.render(mode='rgb_array')  →  480×480 RGB numpy array
+        (must call on unwrapped env — gymnasium wrappers strip mode arg)
 
     Fallback:
         The raw ML observation (84×84 grayscale) — last resort only.
@@ -59,12 +60,30 @@ def capture_display_frame(
     except AttributeError:
         pass
 
-    # --- Strategy 2: Gym render API ---
-    # Built-in games implement render(mode='rgb_array') returning
+    # --- Strategy 2: Render on the *base* environment ---
+    # Built-in games define render(mode='rgb_array') returning
     # high-quality RGB frames (typically 480×480).
+    #
+    # IMPORTANT: We call render() on env.unwrapped (the base GameEnv)
+    # rather than on `env` itself because gymnasium's gym.Wrapper.render()
+    # does NOT accept keyword arguments — calling env.render(mode='rgb_array')
+    # on a wrapped env raises TypeError.  The base GameEnv classes still
+    # use the legacy signature render(self, mode='rgb_array'), so calling
+    # on unwrapped works correctly.
     try:
-        frame = env.render(mode='rgb_array')
+        base = env.unwrapped
+        frame = base.render(mode='rgb_array')
         if frame is not None:
+            return frame
+    except Exception:
+        pass
+
+    # --- Strategy 2b: Gymnasium-native render (no mode arg) ---
+    # If the env uses gymnasium's render_mode system, render() with
+    # no arguments returns the frame based on how the env was created.
+    try:
+        frame = env.render()
+        if frame is not None and isinstance(frame, np.ndarray):
             return frame
     except Exception:
         pass
