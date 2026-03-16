@@ -338,7 +338,7 @@ def _run_decision_transformer(args, registry, game_adapter):
     store_dir = config.get('store_dir', 'experience_store')
     store = ExperienceStore(
         store_dir=store_dir,
-        capacity=config.get('store_capacity', 50000),
+        max_trajectories=config.get('store_capacity', 50000),
     )
 
     print(f'\nExperience Store: {store_dir}')
@@ -630,6 +630,21 @@ def main():
     # ================================================================
     # Create Trainer
     # ================================================================
+
+    # Build an env factory for SB3 multi-env setups (PPO, A2C).
+    # Non-Mario games need a factory that creates fresh envs of the
+    # correct type; Mario uses its own create_cnn_env factory.
+    sb3_env_factory = None
+    if args.game != 'mario' and game_adapter is not None:
+        from src.environment.universal_env import create_env_from_adapter
+        from src.environment.wrappers import SB3CompatWrapper
+        _adapter = game_adapter
+        _gk = dict(game_kwargs)  # snapshot for closure
+
+        def sb3_env_factory():
+            e = create_env_from_adapter(_adapter, **_gk)
+            return SB3CompatWrapper(e)
+
     if args.algorithm == 'neat':
         from src.algorithms.neat.neat_trainer import NEATTrainer
         from src.algorithms.neat.parallel_eval import ParallelGenomeEvaluator
@@ -656,6 +671,7 @@ def main():
             world=args.world,
             stage=args.stage,
             device_preference=args.device,
+            env_factory=sb3_env_factory,
         )
 
     elif args.algorithm == 'dqn':
@@ -684,6 +700,7 @@ def main():
             visualizer=dashboard,
             num_envs=num_envs,
             device_preference=args.device,
+            env_factory=sb3_env_factory,
         )
 
     elif args.algorithm == 'rainbow':

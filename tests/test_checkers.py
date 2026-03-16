@@ -91,15 +91,15 @@ class TestCheckersEnv:
         assert 'p2_pieces' in info
         env.close()
 
-    def test_invalid_move_forfeits(self):
-        """Invalid action should end the game with -1 reward."""
+    def test_invalid_move_redirects(self):
+        """Invalid action should redirect to a random valid move (game continues)."""
         env = CheckersEnv()
         env.reset()
-        # Action 0 (pos 0 -> pos 0) is never a valid move
+        # Action 0 (pos 0 -> pos 0) is never a valid move — should redirect
         _, reward, done, info = env.step(0)
-        assert done is True
-        assert reward == -1.0
-        assert info['winner'] == 2
+        # Game should continue (not forfeit) since valid moves exist
+        assert done is False
+        assert info['moves_played'] > 0
         env.close()
 
     def test_mandatory_captures(self):

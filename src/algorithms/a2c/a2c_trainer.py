@@ -154,10 +154,11 @@ class A2CTrainer(BaseTrainer):
         log_dir: str = 'logs',
         num_envs: int = 1,
         device_preference: Optional[str] = None,
+        env_factory=None,
     ):
         super().__init__(env, config, visualizer, save_dir, log_dir)
         self.model = None
-        self._env_factory = None
+        self._env_factory = env_factory
         self.num_envs = num_envs
         self.device_preference = device_preference
         self.vec_env = None  # Stored so callback can access envs for frame capture

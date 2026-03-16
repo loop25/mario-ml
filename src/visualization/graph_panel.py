@@ -365,36 +365,58 @@ class GraphPanel:
             if isinstance(latest, (list, np.ndarray)) and len(latest) > 0:
                 has_actions = True
                 n_actions = len(latest)
+                all_labels = self.action_labels[:n_actions]
+
+                # For large action spaces (board games: 1024, 4096 actions),
+                # showing every bar makes the chart unreadable.  Aggregate
+                # to the top-N most-used actions + an "Other" bucket.
+                MAX_DISPLAY = 12
+                if n_actions > MAX_DISPLAY:
+                    arr = np.array(latest, dtype=np.float64)
+                    top_idx = np.argsort(arr)[::-1][:MAX_DISPLAY]
+                    top_idx_sorted = np.sort(top_idx)  # keep original order
+                    display_vals = arr[top_idx_sorted].tolist()
+                    display_labels = [all_labels[i] if i < len(all_labels)
+                                      else f'A{i}' for i in top_idx_sorted]
+                    other_sum = arr.sum() - sum(display_vals)
+                    if other_sum > 0:
+                        display_vals.append(other_sum)
+                        display_labels.append('Other')
+                    n_display = len(display_vals)
+                else:
+                    display_vals = list(latest)
+                    display_labels = [l[:8] for l in all_labels]
+                    n_display = n_actions
+
                 # Extend the action color palette if needed (cycle through)
-                bar_colors = (COLORS['actions'] * ((n_actions // len(COLORS['actions'])) + 1))[:n_actions]
+                bar_colors = (COLORS['actions'] * ((n_display // len(COLORS['actions'])) + 1))[:n_display]
                 # Use wider bars for games with few actions (fills the chart)
-                bar_width = max(0.4, min(0.85, 5.0 / max(n_actions, 1)))
+                bar_width = max(0.4, min(0.85, 5.0 / max(n_display, 1)))
                 bars = ax.bar(
-                    range(n_actions), latest,
+                    range(n_display), display_vals,
                     width=bar_width,
                     color=bar_colors,
                     edgecolor='white', linewidth=0.5,
                     alpha=0.9, zorder=3,
                 )
                 # Add percentage labels on top of bars
-                total = sum(latest) if sum(latest) > 0 else 1
-                for bar, count in zip(bars, latest):
+                total = sum(display_vals) if sum(display_vals) > 0 else 1
+                for bar, count in zip(bars, display_vals):
                     pct = count / total * 100
-                    label_y = bar.get_height()
-                    ax.text(
-                        bar.get_x() + bar.get_width() / 2, label_y,
-                        f'{pct:.0f}%', ha='center', va='bottom',
-                        color=COLORS['text'], fontsize=7, fontweight='bold',
-                    )
-                ax.set_xticks(range(n_actions))
-                # Truncate long labels and adjust rotation for readability
-                labels = self.action_labels[:n_actions]
-                truncated = [l[:8] for l in labels]
-                rotation = 35 if n_actions > 5 else 0
+                    if pct >= 1:  # Only label bars with ≥1% to avoid clutter
+                        label_y = bar.get_height()
+                        ax.text(
+                            bar.get_x() + bar.get_width() / 2, label_y,
+                            f'{pct:.0f}%', ha='center', va='bottom',
+                            color=COLORS['text'], fontsize=7, fontweight='bold',
+                        )
+                ax.set_xticks(range(n_display))
+                truncated = [l[:8] for l in display_labels]
+                rotation = 35 if n_display > 5 else 0
                 ax.set_xticklabels(truncated, rotation=rotation, fontsize=7,
                                    ha='right' if rotation else 'center')
                 # Ensure bars are always visible: set a minimum Y range
-                max_val = max(latest) if max(latest) > 0 else 1
+                max_val = max(display_vals) if max(display_vals) > 0 else 1
                 ax.set_ylim(0, max_val * 1.25)  # 25% headroom for labels
 
         if not has_actions:

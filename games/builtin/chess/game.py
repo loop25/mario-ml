@@ -209,13 +209,11 @@ class ChessEnv(gym.Env):
     _MARGIN = 24  # Coordinate label area (inside the frame)
 
     # Piece-type symbols for the status bar (ASCII fallback labels)
-    _PIECE_LABELS = {
-        chess.PAWN: 'P', chess.KNIGHT: 'N', chess.BISHOP: 'B',
-        chess.ROOK: 'R', chess.QUEEN: 'Q', chess.KING: 'K',
-    }
+    # Uses integer constants (PAWN=1..KING=6) so the class can be defined
+    # even when python-chess is not installed.
+    _PIECE_LABELS = {1: 'P', 2: 'N', 3: 'B', 4: 'R', 5: 'Q', 6: 'K'}
     # Piece ordering for material display (most valuable first)
-    _PIECE_ORDER = [chess.QUEEN, chess.ROOK, chess.BISHOP,
-                    chess.KNIGHT, chess.PAWN]
+    _PIECE_ORDER = [5, 4, 3, 2, 1]  # QUEEN, ROOK, BISHOP, KNIGHT, PAWN
 
     def _render_rgb(self) -> np.ndarray:
         """Render a polished chess board for dashboard/stream display.

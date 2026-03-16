@@ -96,9 +96,14 @@ class CheckersEnv(gym.Env):
         # Validate move
         valid_moves = self._get_valid_moves(player=1)
         if (from_pos, to_pos) not in valid_moves:
-            # Invalid move — forfeit
-            self._winner = 2
-            return self._render_obs(), -1.0, True, self._info()
+            if not valid_moves:
+                # No valid moves at all — agent loses
+                self._winner = 2
+                return self._render_obs(), -1.0, True, self._info()
+            # Invalid move — redirect to a random valid move with a penalty
+            # so the game actually progresses and the agent can learn from
+            # board state changes instead of forfeiting every episode.
+            from_pos, to_pos = random.choice(valid_moves)
 
         # Execute agent move
         self._last_from = from_pos

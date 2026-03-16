@@ -354,12 +354,14 @@ class PPOTrainer(BaseTrainer):
         world: int = 1,
         stage: int = 1,
         device_preference: Optional[str] = None,
+        env_factory=None,
     ):
         super().__init__(env, config, visualizer, save_dir, log_dir)
 
         self.num_envs = num_envs
         self.world = world
         self.stage = stage
+        self._env_factory = env_factory
 
         # Wrap the environment for stable-baselines3 compatibility
         # PPO needs: vectorized env, transposed images (channels first)
@@ -422,11 +424,15 @@ class PPOTrainer(BaseTrainer):
             # Single env — simple DummyVecEnv wrapper
             compat_env = SB3CompatWrapper(env)
             vec_env = DummyVecEnv([lambda: compat_env])
+        elif self._env_factory:
+            # Multi-env with env factory (non-Mario games).
+            # The factory creates a fresh, correctly-typed env each time.
+            vec_env = DummyVecEnv([self._env_factory for _ in range(num_envs)])
+            print(f'  PPO: Using DummyVecEnv with {num_envs} environments (same process)')
         else:
-            # Multi-env — create N environments in the SAME process.
-            # nes_py's NES emulator uses a C library that crashes when
-            # used in subprocesses (SubprocVecEnv), so we use DummyVecEnv
-            # which steps envs sequentially in the main process.
+            # Multi-env fallback for Mario — create N environments in the
+            # SAME process.  nes_py's NES emulator uses a C library that
+            # crashes in subprocesses (SubprocVecEnv), so we use DummyVecEnv.
             world, stage = self.world, self.stage
 
             # Store extra envs so we can access .unwrapped for frames.
