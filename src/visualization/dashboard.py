@@ -425,6 +425,11 @@ class Dashboard:
                 is_live=True,
                 algorithm=self.algorithm,
                 game_name=self.game_name,
+                episode=self.metrics.episode_count or None,
+                reward=self.metrics.get_latest('reward'),
+                best_reward=self.metrics.get_best('reward'),
+                elapsed_time=self.metrics.get_elapsed_time() or None,
+                training_target=self._training_target or None,
             )
         self.stream_manager.send_frame(stream_frame)
 
@@ -798,16 +803,6 @@ class Dashboard:
         # Background
         title_rect = pygame.Rect(0, 0, self.window_width, self.top_bar_height)
         pygame.draw.rect(self.screen, TOP_BAR_COLOR, title_rect)
-
-        # Animated "LIVE" indicator on the far left (pulses when training)
-        if not self.is_paused and self.metrics.episode_count > 0:
-            # Pulse the dot brightness using a sine wave
-            pulse = abs(int(time.time() * 3) % 2)  # Blink every ~0.33s
-            dot_color = (255, 50, 50) if pulse else (180, 30, 30)
-            dot_y = self.top_bar_height // 2
-            pygame.draw.circle(self.screen, dot_color, (20, dot_y), 5)
-            live_text = self._label_font.render('LIVE', True, (255, 80, 80))
-            self.screen.blit(live_text, (30, dot_y - live_text.get_height() // 2))
 
         # Title text (centered)
         algo_names = {'neat': 'NEAT', 'ppo': 'PPO', 'dqn': 'DQN'}
