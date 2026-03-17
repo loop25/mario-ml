@@ -572,6 +572,9 @@ class RainbowTrainer(BaseTrainer):
                         self.online_net.state_dict(),
                     )
 
+                # DT trajectory collection
+                self._dt_record_step(next_obs, action, reward)
+
                 # Track metrics
                 episode_reward += reward
                 game_metric_val = info.get(info_key, 0)
@@ -611,6 +614,9 @@ class RainbowTrainer(BaseTrainer):
                             )
                         self.n_step_buffer.popleft()
                     break
+
+            # Finalize DT trajectory for this episode
+            self._dt_finalize_episode()
 
             # Decay epsilon (only if not using noisy nets)
             if not self.use_noisy:
@@ -769,7 +775,7 @@ class RainbowTrainer(BaseTrainer):
         if not path.endswith('.pt'):
             path = f'{path}.pt'
 
-        checkpoint = torch.load(path, map_location=self.device)
+        checkpoint = torch.load(path, map_location=self.device, weights_only=False)
         self.online_net.load_state_dict(checkpoint['online_net'])
         self.target_net.load_state_dict(checkpoint['target_net'])
         self.optimizer.load_state_dict(checkpoint['optimizer'])

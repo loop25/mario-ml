@@ -561,10 +561,7 @@ class Dashboard:
         pygame.display.flip()
 
         # Cap frame rate
-        if is_graph_update:
-            self.clock.tick(self.fps_cap)
-        else:
-            self.clock.tick(self.fps_cap)
+        self.clock.tick(self.fps_cap)
 
     def update_grid(
         self,
@@ -680,10 +677,7 @@ class Dashboard:
 
         pygame.display.flip()
 
-        if is_graph_update:
-            self.clock.tick(self.fps_cap)
-        else:
-            self.clock.tick(self.fps_cap)
+        self.clock.tick(self.fps_cap)
 
     # ========================================================================
     # Event Handling
@@ -988,10 +982,8 @@ class Dashboard:
             ('SPACE', 'Pause / Resume'),
             ('ESC', 'Stop Training'),
             ('M', 'Mute / Unmute'),
-            ('+  /  -', 'Volume Up / Down'),
-            ('N', 'Next Track'),
+            ('\u2191  /  \u2193', 'Volume Up / Down'),
             ('V', 'Cycle Display Mode'),
-            ('R', 'Toggle Recording'),
             ('?  or  H', 'Show / Hide Help'),
         ]
 

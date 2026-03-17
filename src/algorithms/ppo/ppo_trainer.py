@@ -125,6 +125,8 @@ class DashboardCallback(BaseCallback):
         dones = self.locals.get('dones', [False])
 
         # Accumulate per-env episode stats
+        new_obs = self.locals.get('new_obs')
+
         for i in range(min(num_envs, len(rewards))):
             self._env_episode_rewards[i] += rewards[i]
 
@@ -143,6 +145,10 @@ class DashboardCallback(BaseCallback):
                 )
                 if info.get('stage_completed', False):
                     self._env_stage_completed[i] = True
+
+        # DT trajectory collection from env 0
+        if new_obs is not None and len(actions) > 0:
+            self.trainer._dt_record_step(new_obs[0], int(actions[0]), float(rewards[0]))
 
         # --- Live gameplay display ---
         # Frame capture is expensive, so we throttle it.
@@ -236,6 +242,10 @@ class DashboardCallback(BaseCallback):
             self.trainer.best_reward = reward
         if game_metric > self.trainer.best_distance:
             self.trainer.best_distance = game_metric
+
+        # Finalize DT trajectory when env 0 completes an episode
+        if env_index == 0:
+            self.trainer._dt_finalize_episode()
 
         # Notify episode callbacks (curriculum learning, etc.)
         self.trainer._fire_episode_complete(

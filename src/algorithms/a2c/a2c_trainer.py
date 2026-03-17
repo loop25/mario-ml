@@ -60,9 +60,19 @@ class A2CDashboardCallback(BaseCallback):
                 ):
                     return False
 
+        # DT trajectory collection from env 0
+        new_obs = self.locals.get('new_obs')
+        actions = self.locals.get('actions', [])
+        rewards_arr = self.locals.get('rewards', [])
+        if new_obs is not None and len(actions) > 0 and len(rewards_arr) > 0:
+            self.trainer._dt_record_step(new_obs[0], int(actions[0]), float(rewards_arr[0]))
+
         # Check for completed episodes
         for i, done in enumerate(self.locals.get('dones', [])):
             if done:
+                # Finalize DT trajectory when env 0 completes
+                if i == 0:
+                    self.trainer._dt_finalize_episode()
                 infos = self.locals.get('infos', [])
                 if i < len(infos):
                     ep_info = infos[i].get('episode', {})

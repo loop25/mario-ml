@@ -35,7 +35,7 @@ class ConnectFourAdapter(BaseGameAdapter):
         return 'Drop pieces to get four in a row — vertical, horizontal, or diagonal.'
 
     def create_env(self, **kwargs) -> gym.Env:
-        return ConnectFourEnv()
+        return ConnectFourEnv(**kwargs)
 
     def get_action_space_info(self) -> ActionSpaceInfo:
         return ActionSpaceInfo(

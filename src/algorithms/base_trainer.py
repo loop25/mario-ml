@@ -117,6 +117,16 @@ class BaseTrainer(ABC):
         # Checkpoint settings (can be overridden in config)
         self.checkpoint_interval = config.get('save_freq', 50)
 
+        # ── DT Trajectory Collection ────────────────────────────────
+        # When set, episode data is automatically saved to the experience
+        # store for later Decision Transformer training.
+        self._experience_store = None
+        self._tokenizer = None
+        self._episode_obs_buffer = []
+        self._episode_act_buffer = []
+        self._episode_rew_buffer = []
+        self._collect_for_dt = False
+
         # Register graceful shutdown handler
         # This ensures models are saved when the user presses Ctrl+C
         self._original_sigint = signal.getsignal(signal.SIGINT)
@@ -184,6 +194,53 @@ class BaseTrainer(ABC):
             callback: Callable(reward, distance, completed) -> None.
         """
         self._episode_callbacks.append(callback)
+
+    # ── DT Trajectory Collection Helpers ───────────────────────────
+
+    def enable_dt_collection(self, experience_store, game_adapter):
+        """Enable automatic trajectory collection for the Decision Transformer.
+
+        When enabled, each training episode is tokenized and saved to the
+        experience store. This allows specialist agents (PPO/DQN/etc.) to
+        automatically build up the data the DT needs.
+
+        Args:
+            experience_store: ExperienceStore instance.
+            game_adapter: The game's adapter (for TokenConfig).
+        """
+        from src.experience.tokenizer import Tokenizer
+        self._experience_store = experience_store
+        self._tokenizer = Tokenizer(game_adapter.get_token_config())
+        self._collect_for_dt = True
+        print(f'  DT collection enabled → {experience_store.store_dir}')
+
+    def _dt_record_step(self, obs, action, reward):
+        """Record a single step for DT trajectory collection."""
+        if not self._collect_for_dt:
+            return
+        self._episode_obs_buffer.append(obs)
+        self._episode_act_buffer.append(int(action))
+        self._episode_rew_buffer.append(float(reward))
+
+    def _dt_finalize_episode(self):
+        """Finalize and save the current episode to the experience store."""
+        if not self._collect_for_dt or not self._episode_act_buffer:
+            self._episode_obs_buffer.clear()
+            self._episode_act_buffer.clear()
+            self._episode_rew_buffer.clear()
+            return
+        try:
+            trajectory = self._tokenizer.tokenize_episode(
+                observations=self._episode_obs_buffer,
+                actions=self._episode_act_buffer,
+                rewards=self._episode_rew_buffer,
+            )
+            self._experience_store.add_trajectory(trajectory)
+        except Exception as e:
+            print(f'  Warning: DT trajectory save failed: {e}')
+        self._episode_obs_buffer.clear()
+        self._episode_act_buffer.clear()
+        self._episode_rew_buffer.clear()
 
     def _fire_episode_complete(
         self,

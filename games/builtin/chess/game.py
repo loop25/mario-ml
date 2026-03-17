@@ -162,10 +162,10 @@ class ChessEnv(gym.Env):
         if self.board.is_insufficient_material():
             return True, 0.0
 
-        if self.board.can_claim_threefold_repetition():
+        if self.board.is_fivefold_repetition():
             return True, 0.0
 
-        if self.board.can_claim_fifty_moves():
+        if self.board.is_seventyfive_moves():
             return True, 0.0
 
         return False, 0.0

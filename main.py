@@ -308,6 +308,76 @@ def find_resume_checkpoint(algo_name, game_id, save_dir='models'):
     return None, None
 
 
+def _auto_collect_trajectories(registry, store, episodes_per_game, config):
+    """Auto-collect trajectories from all available games using random play.
+
+    This provides the initial training data the Decision Transformer needs.
+    Each game is played for `episodes_per_game` episodes with random actions,
+    and the resulting trajectories are saved to the experience store.
+    """
+    from src.experience.tokenizer import Tokenizer
+    from src.environment.universal_env import create_env_from_adapter
+
+    all_games = registry.list_games()
+    for adapter in all_games:
+        # Skip games that need external dependencies (ROMs, etc.)
+        if hasattr(adapter, 'is_available') and not adapter.is_available():
+            print(f'  Skipping {adapter.name} (not available)')
+            continue
+
+        token_config = adapter.get_token_config()
+        tokenizer = Tokenizer(token_config)
+        game_name = adapter.name
+
+        print(f'  Collecting from {game_name}...')
+
+        try:
+            env = create_env_from_adapter(adapter)
+        except Exception as e:
+            print(f'    Failed to create env: {e}')
+            continue
+
+        collected = 0
+        for ep in range(episodes_per_game):
+            obs_list = []
+            act_list = []
+            rew_list = []
+
+            try:
+                obs = env.reset()
+                obs_list.append(obs)
+                done = False
+                steps = 0
+                max_steps = config.get('collect_max_steps', 1000)
+
+                while not done and steps < max_steps:
+                    action = env.action_space.sample()
+                    obs, reward, done, info = env.step(action)
+                    obs_list.append(obs)
+                    act_list.append(action)
+                    rew_list.append(reward)
+                    steps += 1
+
+                if act_list:
+                    trajectory = tokenizer.tokenize_episode(
+                        observations=obs_list,
+                        actions=act_list,
+                        rewards=rew_list,
+                    )
+                    store.add_trajectory(trajectory)
+                    collected += 1
+            except Exception as e:
+                print(f'    Episode {ep} error: {e}')
+                continue
+
+        try:
+            env.close()
+        except Exception:
+            pass
+
+        print(f'    {game_name}: {collected} trajectories collected')
+
+
 def _run_decision_transformer(args, registry, game_adapter):
     """Run the Decision Transformer pipeline (offline multi-game training).
 
@@ -345,7 +415,7 @@ def _run_decision_transformer(args, registry, game_adapter):
     print(f'  Trajectories: {len(store)}')
     if len(store) > 0:
         stats = store.get_stats()
-        print(f'  Games: {list(stats.get("per_game", {}).keys())}')
+        print(f'  Games: {list(stats.get("games", {}).keys())}')
         print(f'  Total timesteps: {stats.get("total_timesteps", 0):,}')
     print()
 
@@ -392,7 +462,7 @@ def _run_decision_transformer(args, registry, game_adapter):
         # Scale by observed max return if available
         if len(store) > 0:
             stats = store.get_stats()
-            game_stats = stats.get('per_game', {}).get(
+            game_stats = stats.get('games', {}).get(
                 str(token_config.game_token_id), {}
             )
             max_ret = game_stats.get('max_return', 100.0)
@@ -410,19 +480,39 @@ def _run_decision_transformer(args, registry, game_adapter):
         eval_env.close()
         print(f'\nMean reward: {mean_reward:.1f}')
     else:
-        # Training
-        if len(store) < config.get('min_episodes_to_train', 50):
-            print(
-                f'WARNING: Experience store has {len(store)} trajectories, '
-                f'but {config.get("min_episodes_to_train", 50)} are recommended '
-                f'before training. Consider collecting more experience first '
-                f'by training individual game agents.'
+        # Training — auto-collect if experience store needs more data
+        min_episodes = config.get('min_episodes_to_train', 50)
+        collect_per_game = config.get('collect_episodes_per_game', 100)
+
+        if len(store) < min_episodes:
+            print(f'\n{"="*60}')
+            print(f'Phase 1: Auto-Collecting Trajectories')
+            print(f'  Store has {len(store)} trajectories, need {min_episodes}')
+            print(f'  Collecting {collect_per_game} episodes per game...')
+            print(f'{"="*60}\n')
+
+            _auto_collect_trajectories(
+                registry=registry,
+                store=store,
+                episodes_per_game=collect_per_game,
+                config=config,
             )
-            if len(store) == 0:
-                print('ERROR: Cannot train DT with empty experience store.')
-                print('  Run individual game agents first to collect trajectories,')
-                print('  then convert them to the experience store format.')
-                sys.exit(1)
+
+            print(f'\nCollection complete. Store now has {len(store)} trajectories.')
+            stats = store.get_stats()
+            for gid, gstats in stats.get('games', {}).items():
+                print(f'  Game {gid}: {gstats["count"]} trajectories, '
+                      f'avg return {gstats["avg_return"]:.1f}')
+            print()
+
+        if len(store) == 0:
+            print('ERROR: No trajectories collected. Cannot train DT.')
+            sys.exit(1)
+
+        print(f'\n{"="*60}')
+        print(f'Phase 2: Training Decision Transformer')
+        print(f'  Trajectories: {len(store)}')
+        print(f'{"="*60}\n')
 
         trainer.train()
 
@@ -687,6 +777,7 @@ def main():
             world=args.world,
             stage=args.stage,
             device_preference=args.device,
+            env_factory=sb3_env_factory,
         )
 
     elif args.algorithm == 'a2c':
@@ -726,6 +817,16 @@ def main():
     trainer.dashboard_config = game_adapter.get_dashboard_config()
     action_info = game_adapter.get_action_space_info()
     trainer.num_actions = action_info.num_actions
+
+    # Enable automatic DT trajectory collection so specialist agents
+    # build up the experience store the Decision Transformer needs.
+    if args.algorithm not in ('dt', 'neat') and not args.eval:
+        try:
+            from src.experience.experience_store import ExperienceStore
+            dt_store = ExperienceStore(store_dir='experience_store')
+            trainer.enable_dt_collection(dt_store, game_adapter)
+        except Exception as e:
+            print(f'  Note: DT collection disabled ({e})')
 
     # ================================================================
     # Load Checkpoint (explicit or auto-resume)

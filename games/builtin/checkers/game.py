@@ -92,6 +92,7 @@ class CheckersEnv(gym.Env):
     def step(self, action):
         from_pos = action // NUM_SQUARES
         to_pos = action % NUM_SQUARES
+        invalid_penalty = 0.0
 
         # Validate move
         valid_moves = self._get_valid_moves(player=1)
@@ -100,10 +101,11 @@ class CheckersEnv(gym.Env):
                 # No valid moves at all — agent loses
                 self._winner = 2
                 return self._render_obs(), -1.0, True, self._info()
-            # Invalid move — redirect to a random valid move with a penalty
-            # so the game actually progresses and the agent can learn from
-            # board state changes instead of forfeiting every episode.
+            # Invalid move — redirect to a random valid move with a small
+            # penalty so the game progresses and the agent learns to pick
+            # valid moves over time, instead of forfeiting every episode.
             from_pos, to_pos = random.choice(valid_moves)
+            invalid_penalty = -0.1
 
         # Execute agent move
         self._last_from = from_pos
@@ -144,7 +146,7 @@ class CheckersEnv(gym.Env):
         if self._moves_played >= self._max_moves:
             return self._render_obs(), 0.0, True, self._info()
 
-        return self._render_obs(), 0.0, False, self._info()
+        return self._render_obs(), invalid_penalty, False, self._info()
 
     def _get_valid_moves(self, player: int):
         """Get all valid moves for a player. Captures are mandatory."""
@@ -255,8 +257,6 @@ class CheckersEnv(gym.Env):
         highlight), proper mini-crown for kings, last-move golden
         highlights, beveled frame, and a top info banner.
         """
-        import math
-
         size = self.DISPLAY_SIZE          # 480
         border = 14                       # Thick beveled frame
         inner = size - 2 * border

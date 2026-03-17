@@ -457,9 +457,15 @@ def _make_sb3_compat_wrapper_class():
                 shape=env.observation_space.shape,
                 dtype=env.observation_space.dtype,
             )
-            self.action_space = gymnasium.spaces.Discrete(
-                n=env.action_space.n,
-            )
+            # Convert action space — handle Discrete, MultiBinary, etc.
+            src_as = env.action_space
+            if hasattr(src_as, 'n') and not hasattr(src_as, 'nvec'):
+                self.action_space = gymnasium.spaces.Discrete(n=src_as.n)
+            elif hasattr(src_as, 'nvec'):
+                self.action_space = gymnasium.spaces.MultiDiscrete(nvec=src_as.nvec)
+            else:
+                # Pass through as-is (Box, MultiBinary, etc.)
+                self.action_space = src_as
             self.metadata = getattr(env, 'metadata', {})
             self.render_mode = None
             self.reward_range = getattr(env, 'reward_range', (-float('inf'), float('inf')))

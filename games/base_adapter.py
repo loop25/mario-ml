@@ -132,11 +132,14 @@ class BaseGameAdapter(ABC):
     def get_token_config(self) -> TokenConfig:
         """How to tokenize this game for the Decision Transformer."""
         obs_shape = self.get_observation_shape()
+        # Use a deterministic hash (Python's hash() is randomized per-session)
+        import hashlib
+        stable_id = int(hashlib.md5(self.game_id.encode()).hexdigest(), 16) % 1024
         return TokenConfig(
             obs_resolution=(obs_shape[0], obs_shape[1]),
             obs_channels=obs_shape[2] if len(obs_shape) > 2 else 1,
             action_vocab_size=self.get_action_space_info().num_actions,
-            game_token_id=hash(self.game_id) % 1024,
+            game_token_id=stable_id,
         )
 
     # ---- Algorithm Compatibility (optional) ----

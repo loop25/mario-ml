@@ -430,8 +430,6 @@ class GraphPanel:
                      fontsize=10, fontweight='bold')
         ax.tick_params(colors=COLORS['text'], labelsize=7)
 
-        # Re-apply tight layout after clearing and redrawing
-        self.fig.tight_layout(pad=1.5)
         self._needs_update = True
 
     def render(self) -> pygame.Surface:

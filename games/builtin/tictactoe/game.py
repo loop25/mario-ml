@@ -56,6 +56,7 @@ class TicTacToeEnv(gym.Env):
 
         # Invalid move (already occupied or out of range)
         if not (0 <= action < 9) or self.board[row, col] != 0:
+            self._winner = 2  # Opponent wins by forfeit
             return self._render_obs(), -1.0, True, self._info()
 
         # Player 1 (agent) move

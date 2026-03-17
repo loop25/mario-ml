@@ -35,7 +35,7 @@ class TicTacToeAdapter(BaseGameAdapter):
         return 'Classic 3x3 grid — get three in a row to win.'
 
     def create_env(self, **kwargs) -> gym.Env:
-        return TicTacToeEnv()
+        return TicTacToeEnv(**kwargs)
 
     def get_action_space_info(self) -> ActionSpaceInfo:
         labels = [f'({r},{c})' for r in range(3) for c in range(3)]

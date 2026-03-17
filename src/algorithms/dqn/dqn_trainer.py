@@ -80,12 +80,14 @@ class DQNTrainer(BaseTrainer):
         world: int = 1,
         stage: int = 1,
         device_preference: Optional[str] = None,
+        env_factory=None,
     ):
         super().__init__(env, config, visualizer, save_dir, log_dir)
 
         self.num_envs = num_envs
         self.world = world
         self.stage = stage
+        self._env_factory = env_factory
 
         # Centralized device selection with auto-detection
         self.device = select_device(
@@ -157,7 +159,6 @@ class DQNTrainer(BaseTrainer):
         # ================================================================
         self.extra_envs = []
         if num_envs > 1:
-            from src.environment.mario_env import create_cnn_env
             # Pump pygame events between env creations so Windows
             # doesn't flag the window as "Not Responding" during setup.
             try:
@@ -166,7 +167,11 @@ class DQNTrainer(BaseTrainer):
             except (ImportError, Exception):
                 _pump = lambda: None
             for i in range(num_envs - 1):
-                extra_env = create_cnn_env(world=world, stage=stage)
+                if self._env_factory:
+                    extra_env = self._env_factory()
+                else:
+                    from src.environment.mario_env import create_cnn_env
+                    extra_env = create_cnn_env(world=world, stage=stage)
                 self.extra_envs.append(extra_env)
                 _pump()  # Keep window responsive
             print(f'  DQN: Created {num_envs} environments (round-robin, shared replay buffer)')
@@ -350,6 +355,9 @@ class DQNTrainer(BaseTrainer):
                 next_obs, reward, done, info = self.env.step(action)
                 next_obs_processed = self._preprocess_observation(next_obs)
 
+                # Record for DT trajectory collection
+                self._dt_record_step(next_obs, action, reward)
+
                 # Store experience in replay buffer
                 self.replay_buffer.push(
                     state=obs,
@@ -372,7 +380,7 @@ class DQNTrainer(BaseTrainer):
 
                 # Track metrics
                 episode_reward += reward
-                x_pos = info.get('x_pos', 0)
+                x_pos = info.get('x_pos', info.get('score', 0))
                 max_distance = max(max_distance, x_pos)
                 obs = next_obs_processed
 
@@ -386,6 +394,9 @@ class DQNTrainer(BaseTrainer):
 
                 if done:
                     break
+
+            # Save episode for DT training
+            self._dt_finalize_episode()
 
             # Decay epsilon after each episode
             self.epsilon = max(
@@ -546,16 +557,13 @@ class DQNTrainer(BaseTrainer):
 
                 # Track metrics
                 env_rewards[env_idx] += reward
-                x_pos = info.get('x_pos', 0)
+                x_pos = info.get('x_pos', info.get('score', 0))
                 env_distances[env_idx] = max(env_distances[env_idx], x_pos)
                 env_obs[env_idx] = next_obs_processed
                 env_steps[env_idx] += 1
 
                 # Capture frame
-                try:
-                    env_frames[env_idx] = env.unwrapped.screen
-                except AttributeError:
-                    env_frames[env_idx] = next_obs
+                env_frames[env_idx] = capture_display_frame(env, fallback_obs=next_obs)
 
                 # Check max steps
                 if env_steps[env_idx] >= self.max_steps:
@@ -755,7 +763,7 @@ class DQNTrainer(BaseTrainer):
         if not os.path.exists(path):
             raise FileNotFoundError(f'Checkpoint not found: {path}')
 
-        checkpoint = torch.load(path, map_location=self.device)
+        checkpoint = torch.load(path, map_location=self.device, weights_only=False)
 
         self.policy_net.load_state_dict(checkpoint['policy_net'])
         self.target_net.load_state_dict(checkpoint['target_net'])

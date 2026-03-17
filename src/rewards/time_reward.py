@@ -52,6 +52,11 @@ class TimeRewardWrapper(gym.Wrapper):
     def step(self, action):
         obs, reward, done, info = self.env.step(action)
         now = time.time()
+        # Guard against step() called before reset()
+        if self._last_step_time is None:
+            self._last_step_time = now
+        if self._episode_start is None:
+            self._episode_start = now
         dt = now - self._last_step_time
         self._last_step_time = now
         episode_time = now - self._episode_start

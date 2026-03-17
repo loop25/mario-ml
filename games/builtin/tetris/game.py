@@ -136,6 +136,7 @@ class TetrisEnv(gym.Env):
 
     def step(self, action):
         self._total_steps += 1
+        self._last_clear_count = 0  # Reset flash from previous frame
         reward = 0.0
 
         # Apply action to current piece

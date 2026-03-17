@@ -59,7 +59,8 @@ class ConnectFourEnv(gym.Env):
         self._last_col = action
         # Player 1 move
         if not self._is_valid_column(action):
-            # Illegal move — game over with penalty
+            # Illegal move — opponent wins by forfeit
+            self._winner = 2
             return self._render_obs(), -1.0, True, self._info()
 
         self._drop_piece(action, player=1)
@@ -245,20 +246,22 @@ class ConnectFourEnv(gym.Env):
                                 0, 20, 160, (5, 5, 15), 1, cv2.LINE_AA)
 
                 elif val == 1:
+                    # Red piece (BGR: high B=0, G=40, R=210)
                     self._draw_glossy_piece(img, cx, cy, radius,
-                                            base=(40, 40, 210),
-                                            light=(100, 100, 255),
-                                            highlight=(170, 170, 255),
+                                            base=(50, 40, 210),
+                                            light=(80, 80, 255),
+                                            highlight=(140, 150, 255),
                                             shadow=(15, 15, 100),
-                                            rim=(80, 80, 240))
+                                            rim=(60, 60, 240))
 
                 elif val == 2:
+                    # Yellow piece (BGR: high B=0, G=210, R=230)
                     self._draw_glossy_piece(img, cx, cy, radius,
-                                            base=(30, 200, 230),
-                                            light=(60, 230, 255),
-                                            highlight=(150, 250, 255),
-                                            shadow=(10, 100, 115),
-                                            rim=(50, 220, 245))
+                                            base=(30, 210, 230),
+                                            light=(50, 235, 255),
+                                            highlight=(120, 250, 255),
+                                            shadow=(10, 110, 120),
+                                            rim=(40, 225, 245))
 
         # ── Winning highlight ─────────────────────────────────────
         winning = self._get_winning_cells()
