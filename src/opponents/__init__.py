@@ -1,0 +1,13 @@
+"""
+Opponents
+=========
+Pluggable opponent system for board games (Chess, Checkers, Connect4, TicTacToe).
+
+Provides a base interface and concrete implementations so that any game adapter
+can be paired with random, minimax, trained-model, or human opponents.
+"""
+
+from .base_opponent import BaseOpponent
+from .random_opponent import RandomOpponent
+
+__all__ = ["BaseOpponent", "RandomOpponent"]
