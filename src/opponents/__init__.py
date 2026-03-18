@@ -8,6 +8,7 @@ can be paired with random, minimax, trained-model, or human opponents.
 """
 
 from .base_opponent import BaseOpponent
+from .minimax_opponent import MinimaxOpponent
 from .random_opponent import RandomOpponent
 
-__all__ = ["BaseOpponent", "RandomOpponent"]
+__all__ = ["BaseOpponent", "MinimaxOpponent", "RandomOpponent"]
