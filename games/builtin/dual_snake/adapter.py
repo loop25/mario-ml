@@ -74,7 +74,7 @@ class DualSnakeAdapter(BaseGameAdapter):
         )
 
     def supported_algorithms(self) -> List[str]:
-        return ['ppo', 'dqn', 'a2c', 'rainbow']
+        return ['ppo', 'dqn', 'a2c', 'rainbow', 'dt']
 
     def get_dashboard_config(self) -> dict:
         return {

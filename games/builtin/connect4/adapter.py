@@ -56,7 +56,7 @@ class ConnectFourAdapter(BaseGameAdapter):
 
     def supported_algorithms(self) -> List[str]:
         # NEAT requires small flat obs (13x13); Connect Four uses 84x84 images.
-        return ['ppo', 'dqn', 'a2c', 'rainbow']
+        return ['ppo', 'dqn', 'a2c', 'rainbow', 'dt']
 
     def get_reward_config(self) -> RewardConfig:
         return RewardConfig(

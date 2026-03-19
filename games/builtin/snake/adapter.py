@@ -69,7 +69,7 @@ class SnakeAdapter(BaseGameAdapter):
 
     def supported_algorithms(self) -> List[str]:
         # NEAT requires small flat obs (13x13); Snake uses 84x84 images.
-        return ['ppo', 'dqn', 'a2c', 'rainbow']
+        return ['ppo', 'dqn', 'a2c', 'rainbow', 'dt']
 
     def get_dashboard_config(self) -> dict:
         return {
