@@ -970,6 +970,8 @@ class MarioLauncher:
             ("Add Game...",            self._add_game_wizard),
             ("Tournament",             self._open_tournament),
             ("Agent Gallery",          self._open_agent_gallery),
+            ("Export Agent",           self._export_agent),
+            ("Import Agent",           self._import_agent),
         ]:
             tk.Button(
                 right_col, text=label,
@@ -1767,6 +1769,40 @@ class MarioLauncher:
                     card, text=badges_text,
                     font=("Segoe UI", 8), fg=ACCENT_GREEN, bg=BG_MEDIUM,
                 ).pack(anchor="w", pady=(2, 0))
+
+    # ── Model Zoo: Export / Import ──────────────────────────────────
+
+    def _export_agent(self):
+        """Export a trained agent as a .agent package."""
+        model_dir = filedialog.askdirectory(
+            title="Select Model Directory to Export",
+            initialdir=MODELS_DIR,
+        )
+        if not model_dir:
+            return
+        try:
+            from src.model_zoo.agent_package import export_agent
+            output = export_agent(model_dir)
+            self._set_status(f"Agent exported: {os.path.basename(output)}", ACCENT_GREEN)
+            messagebox.showinfo("Export Successful", f"Agent saved to:\n{output}")
+        except Exception as e:
+            messagebox.showerror("Export Failed", str(e))
+
+    def _import_agent(self):
+        """Import a .agent package."""
+        agent_path = filedialog.askopenfilename(
+            title="Select Agent Package",
+            filetypes=[("Agent Package", "*.agent"), ("All Files", "*.*")],
+        )
+        if not agent_path:
+            return
+        try:
+            from src.model_zoo.agent_package import import_agent
+            dest = import_agent(agent_path)
+            self._set_status(f"Agent imported to: {dest}", ACCENT_GREEN)
+            messagebox.showinfo("Import Successful", f"Agent imported to:\n{dest}")
+        except Exception as e:
+            messagebox.showerror("Import Failed", str(e))
 
     def _open_tournament(self):
         """Open tournament setup dialog."""
