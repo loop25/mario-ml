@@ -430,6 +430,7 @@ class Dashboard:
                 best_reward=self.metrics.get_best('reward'),
                 elapsed_time=self.metrics.get_elapsed_time() or None,
                 training_target=self._training_target or None,
+                num_envs=self.num_envs,
             )
         self.stream_manager.send_frame(stream_frame)
 

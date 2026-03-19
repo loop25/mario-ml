@@ -68,6 +68,11 @@ class StreamManager:
         self.error_message: Optional[str] = None
         self._frame_count = 0
         self._start_time = 0.0
+        self._reconnect_attempts = 0
+        self._max_reconnect_attempts = 5
+        self._reconnect_delay = 5  # seconds
+        self._auto_reconnect = True
+        self._last_frame: Optional[np.ndarray] = None
 
     def _build_ffmpeg_command(self) -> list:
         cmd = ['ffmpeg', '-y']
@@ -305,17 +310,61 @@ class StreamManager:
 
     def send_frame(self, frame: np.ndarray) -> None:
         if not self.is_streaming or self._process is None:
+            # Try auto-reconnect if we were streaming and lost connection
+            if self._auto_reconnect and self._last_frame is not None:
+                self._try_reconnect()
             return
         try:
             if frame.shape[0] != self.height or frame.shape[1] != self.width:
                 import cv2
                 frame = cv2.resize(frame, (self.width, self.height))
+            self._last_frame = frame
             self._process.stdin.write(frame.tobytes())
             self._frame_count += 1
+            self._reconnect_attempts = 0  # Reset on successful send
         except (BrokenPipeError, OSError):
             self.is_streaming = False
             self.error_message = 'Stream connection lost'
-            print(f'[Stream] ERROR: {self.error_message}')
+            print(f'[Stream] WARNING: Connection lost, will auto-reconnect...')
+            self._try_reconnect()
+
+    def _try_reconnect(self) -> None:
+        """Attempt to reconnect the stream after a dropped connection."""
+        if self._reconnect_attempts >= self._max_reconnect_attempts:
+            print(f'[Stream] ERROR: Failed to reconnect after '
+                  f'{self._max_reconnect_attempts} attempts. Stream stopped.')
+            self._auto_reconnect = False
+            return
+
+        self._reconnect_attempts += 1
+        print(f'[Stream] Reconnect attempt {self._reconnect_attempts}/'
+              f'{self._max_reconnect_attempts} in {self._reconnect_delay}s...')
+
+        # Kill old process
+        self._kill_ffmpeg()
+
+        time.sleep(self._reconnect_delay)
+
+        # Restart ffmpeg
+        cmd = self._build_ffmpeg_command()
+        try:
+            self._process = subprocess.Popen(
+                cmd,
+                stdin=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                stdout=subprocess.DEVNULL,
+            )
+            self.is_streaming = True
+            self.error_message = None
+
+            # Restart health monitor
+            self._health_thread = threading.Thread(
+                target=self._monitor_health, daemon=True)
+            self._health_thread.start()
+
+            print(f'[Stream] Reconnected successfully!')
+        except OSError as e:
+            print(f'[Stream] Reconnect failed: {e}')
 
     def _monitor_health(self) -> None:
         if not self._process:

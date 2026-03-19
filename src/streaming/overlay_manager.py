@@ -59,6 +59,7 @@ class OverlayManager:
         elapsed_time: Optional[float] = None,
         game_name: Optional[str] = None,
         training_target: Optional[int] = None,
+        num_envs: int = 1,
     ) -> np.ndarray:
         """
         Compose the final stream frame with overlays.
@@ -89,7 +90,7 @@ class OverlayManager:
             self._draw_top_bar(frame_bgr, algorithm, stage, game_name,
                                episode, training_target)
             self._draw_bottom_bar(frame_bgr, episode, reward, best_reward,
-                                  elapsed_time)
+                                  elapsed_time, num_envs)
             self._draw_corner_accents(frame_bgr)
 
         return cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2RGB)
@@ -103,10 +104,8 @@ class OverlayManager:
     ) -> None:
         h = self.TOP_BAR_HEIGHT
 
-        # Semi-transparent background
-        overlay = f.copy()
-        cv2.rectangle(overlay, (0, 0), (self.width, h), PANEL_BG, -1)
-        cv2.addWeighted(overlay, 0.82, f, 0.18, 0, f)
+        # Solid opaque background — no bleed-through from dashboard text
+        cv2.rectangle(f, (0, 0), (self.width, h), PANEL_BG, -1)
 
         # Bottom edge line
         cv2.line(f, (0, h), (self.width, h), ACCENT_DIM, 1)
@@ -194,16 +193,13 @@ class OverlayManager:
     def _draw_bottom_bar(
         self, f: np.ndarray, episode: Optional[int],
         reward: Optional[float], best_reward: Optional[float],
-        elapsed_time: Optional[float],
+        elapsed_time: Optional[float], num_envs: int = 1,
     ) -> None:
         h = self.BOTTOM_BAR_HEIGHT
         y0 = self.height - h
 
-        # Semi-transparent background
-        overlay = f.copy()
-        cv2.rectangle(overlay, (0, y0), (self.width, self.height),
-                      PANEL_BG, -1)
-        cv2.addWeighted(overlay, 0.78, f, 0.22, 0, f)
+        # Solid opaque background — no bleed-through from dashboard text
+        cv2.rectangle(f, (0, y0), (self.width, self.height), PANEL_BG, -1)
 
         # Top edge line
         cv2.line(f, (0, y0), (self.width, y0), ACCENT_DIM, 1)
@@ -211,7 +207,7 @@ class OverlayManager:
         text_y = y0 + h // 2 + 5
         x = 16
 
-        # Episode count
+        # Episode count (with multi-env context if applicable)
         if episode is not None:
             self._put_text(f, 'EP', (x, text_y),
                            scale=0.38, color=TEXT_DIM, thickness=1)
@@ -220,7 +216,16 @@ class OverlayManager:
                            scale=0.48, color=TEXT_WHITE, thickness=1)
             tw = cv2.getTextSize(f'{episode:,}', cv2.FONT_HERSHEY_SIMPLEX,
                                  0.48, 1)[0][0]
-            x += tw + 20
+            x += tw + 4
+            if num_envs > 1:
+                env_label = f'({num_envs} envs)'
+                self._put_text(f, env_label, (x, text_y),
+                               scale=0.32, color=TEXT_DIM, thickness=1)
+                tw2 = cv2.getTextSize(env_label, cv2.FONT_HERSHEY_SIMPLEX,
+                                      0.32, 1)[0][0]
+                x += tw2 + 10
+            else:
+                x += 16
 
         # Separator
         if episode is not None and reward is not None:
