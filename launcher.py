@@ -1002,177 +1002,355 @@ class MarioLauncher:
     # ===================================================================
 
     def _build_schedule_section(self, parent):
-        """Collapsible panel: training schedule and session queue."""
-        self._sched_expanded = False
-
-        toggle = tk.Frame(parent, bg=BG_MEDIUM, cursor="hand2")
-        toggle.pack(fill="x")
-
-        self.sched_arrow = tk.Label(
-            toggle,
-            text="▸  Training Schedule",
-            font=("Segoe UI", 10, "bold"),
-            fg=TEXT_DIM, bg=BG_MEDIUM,
-            padx=20, pady=6,
-        )
-        self.sched_arrow.pack(anchor="w")
-
-        for widget in [toggle, self.sched_arrow]:
-            widget.bind("<Button-1>", lambda e: self._toggle_schedule())
-
-        self.sched_content = tk.Frame(parent, bg=BG_DARK)
-        self._build_schedule_content(self.sched_content)
-
-    def _build_schedule_content(self, parent):
-        """Build the schedule panel contents."""
-        inner = tk.Frame(parent, bg=BG_DARK, padx=20, pady=8)
-        inner.pack(fill="x")
-
-        # ── Top row: presets + actions ────────────────────────────────
-        top_row = tk.Frame(inner, bg=BG_DARK)
-        top_row.pack(fill="x")
-
-        tk.Label(
-            top_row, text="QUICK SCHEDULES",
-            font=("Segoe UI", 8, "bold"), fg=TEXT_DIM, bg=BG_DARK,
-        ).pack(anchor="w")
-
-        presets_row = tk.Frame(top_row, bg=BG_DARK)
-        presets_row.pack(fill="x", pady=(4, 0))
-
-        preset_btn = dict(
-            font=("Segoe UI", 9), bg=BG_MEDIUM, fg=TEXT_PRIMARY,
-            activebackground=BG_LIGHT, activeforeground=TEXT_PRIMARY,
-            relief="flat", cursor="hand2", padx=10, pady=4,
-        )
-        tk.Button(
-            presets_row, text="Overnight All Games",
-            command=self._sched_overnight, **preset_btn,
-        ).pack(side="left", padx=(0, 5))
-        tk.Button(
-            presets_row, text="DT Generalist Run",
-            command=self._sched_dt_run, **preset_btn,
-        ).pack(side="left", padx=(0, 5))
-        tk.Button(
-            presets_row, text="Add Current Settings",
-            command=self._sched_add_current, **preset_btn,
-        ).pack(side="left", padx=(0, 5))
-        tk.Button(
-            presets_row, text="Clear All",
-            command=self._sched_clear,
-            font=("Segoe UI", 9), bg=BG_MEDIUM, fg=ACCENT_RED,
-            activebackground=BG_LIGHT, activeforeground=ACCENT_RED,
-            relief="flat", cursor="hand2", padx=10, pady=4,
-        ).pack(side="right")
-
-        # ── Separator ─────────────────────────────────────────────────
-        tk.Frame(inner, bg=BORDER_COLOR, height=1).pack(
-            fill="x", pady=(8, 6),
-        )
-
-        # ── Session queue (scrollable list) ───────────────────────────
-        tk.Label(
-            inner, text="SESSION QUEUE",
-            font=("Segoe UI", 8, "bold"), fg=TEXT_DIM, bg=BG_DARK,
-        ).pack(anchor="w")
-
-        # Header row
-        header_row = tk.Frame(inner, bg=BG_MEDIUM)
-        header_row.pack(fill="x", pady=(4, 0))
-        hdr_style = dict(font=("Segoe UI", 8, "bold"), fg=TEXT_DIM, bg=BG_MEDIUM, pady=3)
-        tk.Label(header_row, text="  #", width=3, anchor="w", **hdr_style).pack(side="left")
-        tk.Label(header_row, text="Game", width=12, anchor="w", **hdr_style).pack(side="left")
-        tk.Label(header_row, text="Algorithm", width=10, anchor="w", **hdr_style).pack(side="left")
-        tk.Label(header_row, text="Episodes", width=10, anchor="w", **hdr_style).pack(side="left")
-        tk.Label(header_row, text="Stream", width=6, anchor="w", **hdr_style).pack(side="left")
-        tk.Label(header_row, text="Status", width=10, anchor="w", **hdr_style).pack(side="left")
-
-        # Scrollable session list
-        list_frame = tk.Frame(inner, bg=BG_DARK)
-        list_frame.pack(fill="x", pady=(0, 4))
-
-        self.sched_canvas = tk.Canvas(
-            list_frame, bg=BG_DARK, highlightthickness=0, height=120,
-        )
-        self.sched_scrollbar = tk.Scrollbar(
-            list_frame, orient="vertical", command=self.sched_canvas.yview,
-        )
-        self.sched_list_frame = tk.Frame(self.sched_canvas, bg=BG_DARK)
-        self.sched_list_frame.bind(
-            "<Configure>",
-            lambda e: self.sched_canvas.configure(
-                scrollregion=self.sched_canvas.bbox("all")
-            ),
-        )
-        self.sched_canvas.create_window(
-            (0, 0), window=self.sched_list_frame, anchor="nw",
-        )
-        self.sched_canvas.configure(yscrollcommand=self.sched_scrollbar.set)
-        self.sched_canvas.pack(side="left", fill="x", expand=True)
-        self.sched_scrollbar.pack(side="right", fill="y")
-
-        # ── Bottom: Run Schedule button ───────────────────────────────
-        bottom_row = tk.Frame(inner, bg=BG_DARK)
-        bottom_row.pack(fill="x", pady=(4, 0))
-
-        self.sched_status = tk.Label(
-            bottom_row, text="No sessions scheduled",
-            font=("Segoe UI", 9), fg=TEXT_DIM, bg=BG_DARK,
-        )
-        self.sched_status.pack(side="left")
-
-        self.run_schedule_btn = tk.Button(
-            bottom_row,
-            text="▶  Run Schedule",
-            font=("Segoe UI", 10, "bold"),
-            bg=ACCENT_BLUE, fg=BG_DARK,
-            activebackground="#3d8ee6", activeforeground=BG_DARK,
-            relief="flat", cursor="hand2", padx=16, pady=4,
-            command=self._sched_run,
-        )
-        self.run_schedule_btn.pack(side="right")
-
-        # Initialize the calendar store and refresh the list
+        """Schedule button that opens the full scheduling window."""
+        # Initialize the calendar store early
         try:
             from src.scheduler import CalendarStore
             self._calendar_store = CalendarStore()
         except Exception:
             self._calendar_store = None
+
+        self._schedule_window = None
+
+        sched_bar = tk.Frame(parent, bg=BG_MEDIUM, cursor="hand2")
+        sched_bar.pack(fill="x")
+        sched_label = tk.Label(
+            sched_bar,
+            text="\U0001f4c5  Open Training Schedule",
+            font=("Segoe UI", 10, "bold"),
+            fg=ACCENT_BLUE, bg=BG_MEDIUM,
+            padx=20, pady=6,
+        )
+        sched_label.pack(anchor="w")
+        for w in [sched_bar, sched_label]:
+            w.bind("<Button-1>", lambda e: self._open_schedule_window())
+
+    # ---------------------------------------------------------------
+    # Schedule Window (Toplevel)
+    # ---------------------------------------------------------------
+
+    def _open_schedule_window(self):
+        """Open (or focus) the full training-schedule management window."""
+        if self._schedule_window is not None:
+            try:
+                self._schedule_window.lift()
+                self._schedule_window.focus_force()
+                return
+            except tk.TclError:
+                self._schedule_window = None
+
+        win = tk.Toplevel(self.root)
+        win.title("Training Schedule")
+        win.configure(bg=BG_DARK)
+        win.geometry("820x620")
+        win.minsize(700, 450)
+        win.transient(self.root)
+        self._schedule_window = win
+        win.protocol("WM_DELETE_WINDOW", self._close_schedule_window)
+
+        # ── Header ────────────────────────────────────────────────
+        hdr = tk.Frame(win, bg=BG_MEDIUM, padx=20, pady=10)
+        hdr.pack(fill="x")
+        tk.Label(
+            hdr, text="Training Schedule",
+            font=("Segoe UI", 14, "bold"), fg=TEXT_PRIMARY, bg=BG_MEDIUM,
+        ).pack(anchor="w")
+        tk.Label(
+            hdr, text="Plan and automate your training sessions",
+            font=("Segoe UI", 9), fg=TEXT_DIM, bg=BG_MEDIUM,
+        ).pack(anchor="w")
+
+        # ── Add-session form ──────────────────────────────────────
+        form_outer = tk.LabelFrame(
+            win, text="  Add Session  ", font=("Segoe UI", 9, "bold"),
+            fg=TEXT_DIM, bg=BG_DARK, bd=1, relief="groove",
+            padx=12, pady=8,
+        )
+        form_outer.pack(fill="x", padx=14, pady=(10, 4))
+
+        self._sched_form = {}  # holds tk vars for the add-session form
+
+        # Row 1: Game, Algorithm, Episodes
+        r1 = tk.Frame(form_outer, bg=BG_DARK)
+        r1.pack(fill="x", pady=(0, 6))
+
+        tk.Label(r1, text="Game", font=("Segoe UI", 8, "bold"),
+                 fg=TEXT_DIM, bg=BG_DARK).grid(row=0, column=0, sticky="w")
+        game_ids = [g.game_id for g in self.available_games]
+        game_var = tk.StringVar(value=game_ids[0] if game_ids else "mario")
+        game_cb = ttk.Combobox(r1, textvariable=game_var, values=game_ids,
+                               state="readonly", width=14)
+        game_cb.grid(row=1, column=0, sticky="w", padx=(0, 10))
+        self._sched_form['game'] = game_var
+
+        tk.Label(r1, text="Algorithm", font=("Segoe UI", 8, "bold"),
+                 fg=TEXT_DIM, bg=BG_DARK).grid(row=0, column=1, sticky="w")
+        algo_names = list(ALGO_INFO.keys())
+        algo_var = tk.StringVar(value="ppo")
+        algo_cb = ttk.Combobox(r1, textvariable=algo_var, values=algo_names,
+                               state="readonly", width=10)
+        algo_cb.grid(row=1, column=1, sticky="w", padx=(0, 10))
+        self._sched_form['algo'] = algo_var
+
+        tk.Label(r1, text="Episodes", font=("Segoe UI", 8, "bold"),
+                 fg=TEXT_DIM, bg=BG_DARK).grid(row=0, column=2, sticky="w")
+        ep_var = tk.StringVar(value="1000")
+        ep_entry = tk.Entry(r1, textvariable=ep_var, width=10,
+                            bg=BG_LIGHT, fg=TEXT_PRIMARY,
+                            insertbackground=TEXT_PRIMARY, relief="flat")
+        ep_entry.grid(row=1, column=2, sticky="w", padx=(0, 10))
+        self._sched_form['episodes'] = ep_var
+
+        # Stream checkbox
+        stream_var = tk.BooleanVar(value=False)
+        tk.Checkbutton(
+            r1, text="Stream", variable=stream_var,
+            font=("Segoe UI", 9), fg=TEXT_PRIMARY, bg=BG_DARK,
+            selectcolor=BG_MEDIUM, activebackground=BG_DARK,
+            activeforeground=TEXT_PRIMARY,
+        ).grid(row=1, column=3, sticky="w", padx=(0, 10))
+        self._sched_form['stream'] = stream_var
+
+        # Row 2: Date/time pickers + immediate checkbox
+        r2 = tk.Frame(form_outer, bg=BG_DARK)
+        r2.pack(fill="x", pady=(0, 6))
+
+        imm_var = tk.BooleanVar(value=True)
+        self._sched_form['immediate'] = imm_var
+
+        from datetime import datetime as _dt
+        now = _dt.now()
+
+        tk.Label(r2, text="Date", font=("Segoe UI", 8, "bold"),
+                 fg=TEXT_DIM, bg=BG_DARK).grid(row=0, column=0, sticky="w")
+        dt_frame = tk.Frame(r2, bg=BG_DARK)
+        dt_frame.grid(row=1, column=0, sticky="w", padx=(0, 10))
+
+        years = [str(y) for y in range(2024, 2028)]
+        months = [f'{m:02d}' for m in range(1, 13)]
+        days_list = [f'{d:02d}' for d in range(1, 32)]
+        hours_list = [f'{h:02d}' for h in range(24)]
+        minutes_list = [f'{m:02d}' for m in range(0, 60, 5)]
+
+        yr_var = tk.StringVar(value=str(now.year))
+        mo_var = tk.StringVar(value=f'{now.month:02d}')
+        dy_var = tk.StringVar(value=f'{now.day:02d}')
+        hr_var = tk.StringVar(value=f'{now.hour:02d}')
+        mn_var = tk.StringVar(value=f'{(now.minute // 5) * 5:02d}')
+
+        self._sched_dt_widgets = []  # to enable/disable with immediate
+
+        yr_cb = ttk.Combobox(dt_frame, textvariable=yr_var, values=years,
+                             state="readonly", width=5)
+        yr_cb.pack(side="left", padx=(0, 2))
+        mo_cb = ttk.Combobox(dt_frame, textvariable=mo_var, values=months,
+                             state="readonly", width=3)
+        mo_cb.pack(side="left", padx=(0, 2))
+        dy_cb = ttk.Combobox(dt_frame, textvariable=dy_var, values=days_list,
+                             state="readonly", width=3)
+        dy_cb.pack(side="left", padx=(0, 6))
+        self._sched_dt_widgets.extend([yr_cb, mo_cb, dy_cb])
+
+        tk.Label(r2, text="Time", font=("Segoe UI", 8, "bold"),
+                 fg=TEXT_DIM, bg=BG_DARK).grid(row=0, column=1, sticky="w")
+        tm_frame = tk.Frame(r2, bg=BG_DARK)
+        tm_frame.grid(row=1, column=1, sticky="w", padx=(0, 10))
+
+        hr_cb = ttk.Combobox(tm_frame, textvariable=hr_var, values=hours_list,
+                             state="readonly", width=3)
+        hr_cb.pack(side="left", padx=(0, 1))
+        tk.Label(tm_frame, text=":", fg=TEXT_DIM, bg=BG_DARK,
+                 font=("Segoe UI", 9, "bold")).pack(side="left")
+        mn_cb = ttk.Combobox(tm_frame, textvariable=mn_var, values=minutes_list,
+                             state="readonly", width=3)
+        mn_cb.pack(side="left")
+        self._sched_dt_widgets.extend([hr_cb, mn_cb])
+
+        self._sched_form['year'] = yr_var
+        self._sched_form['month'] = mo_var
+        self._sched_form['day'] = dy_var
+        self._sched_form['hour'] = hr_var
+        self._sched_form['minute'] = mn_var
+
+        tk.Checkbutton(
+            r2, text="Schedule Immediately", variable=imm_var,
+            font=("Segoe UI", 9), fg=TEXT_PRIMARY, bg=BG_DARK,
+            selectcolor=BG_MEDIUM, activebackground=BG_DARK,
+            activeforeground=TEXT_PRIMARY,
+            command=self._toggle_datetime_fields,
+        ).grid(row=1, column=2, sticky="w", padx=(0, 10))
+
+        # Initial state: immediate checked -> hide date/time
+        self._toggle_datetime_fields()
+
+        # Add session button
+        tk.Button(
+            r2, text="+ Add Session",
+            font=("Segoe UI", 9, "bold"),
+            bg=ACCENT_GREEN, fg=BG_DARK,
+            activebackground="#4bb569", activeforeground=BG_DARK,
+            relief="flat", cursor="hand2", padx=14, pady=3,
+            command=self._sched_add_from_form,
+        ).grid(row=1, column=3, sticky="w")
+
+        # ── Session queue (scrollable) ────────────────────────────
+        queue_lbl_frame = tk.Frame(win, bg=BG_DARK, padx=14)
+        queue_lbl_frame.pack(fill="x", pady=(8, 0))
+        tk.Label(
+            queue_lbl_frame, text="SESSION QUEUE",
+            font=("Segoe UI", 8, "bold"), fg=TEXT_DIM, bg=BG_DARK,
+        ).pack(anchor="w")
+
+        # Header row
+        hdr_frame = tk.Frame(win, bg=BG_MEDIUM, padx=14)
+        hdr_frame.pack(fill="x", padx=14, pady=(4, 0))
+        hdr_s = dict(font=("Segoe UI", 8, "bold"), fg=TEXT_DIM,
+                     bg=BG_MEDIUM, pady=3)
+        tk.Label(hdr_frame, text=" #", width=3, anchor="w", **hdr_s).pack(side="left")
+        tk.Label(hdr_frame, text="Game", width=10, anchor="w", **hdr_s).pack(side="left")
+        tk.Label(hdr_frame, text="Algorithm", width=9, anchor="w", **hdr_s).pack(side="left")
+        tk.Label(hdr_frame, text="Episodes", width=8, anchor="w", **hdr_s).pack(side="left")
+        tk.Label(hdr_frame, text="Scheduled", width=16, anchor="w", **hdr_s).pack(side="left")
+        tk.Label(hdr_frame, text="Stream", width=6, anchor="w", **hdr_s).pack(side="left")
+        tk.Label(hdr_frame, text="Status", width=10, anchor="w", **hdr_s).pack(side="left")
+        tk.Label(hdr_frame, text="Actions", width=8, anchor="w", **hdr_s).pack(side="left")
+
+        # Scrollable list container
+        list_outer = tk.Frame(win, bg=BG_DARK, padx=14)
+        list_outer.pack(fill="both", expand=True, padx=14)
+
+        self._sw_canvas = tk.Canvas(list_outer, bg=BG_DARK,
+                                    highlightthickness=0)
+        self._sw_scrollbar = tk.Scrollbar(list_outer, orient="vertical",
+                                          command=self._sw_canvas.yview)
+        self._sw_inner = tk.Frame(self._sw_canvas, bg=BG_DARK)
+        self._sw_inner.bind(
+            "<Configure>",
+            lambda e: self._sw_canvas.configure(
+                scrollregion=self._sw_canvas.bbox("all")),
+        )
+        self._sw_canvas.create_window((0, 0), window=self._sw_inner,
+                                      anchor="nw")
+        self._sw_canvas.configure(yscrollcommand=self._sw_scrollbar.set)
+        self._sw_canvas.pack(side="left", fill="both", expand=True)
+        self._sw_scrollbar.pack(side="right", fill="y")
+
+        # mousewheel scrolling
+        def _on_mousewheel(event):
+            self._sw_canvas.yview_scroll(
+                int(-1 * (event.delta / 120)), "units")
+
+        self._sw_canvas.bind_all("<MouseWheel>", _on_mousewheel)
+        win.bind("<Destroy>", lambda e: (
+            self._sw_canvas.unbind_all("<MouseWheel>")
+            if e.widget is win else None
+        ))
+
+        # ── Bottom controls ───────────────────────────────────────
+        bot = tk.Frame(win, bg=BG_MEDIUM, padx=14, pady=8)
+        bot.pack(fill="x", side="bottom")
+
+        self._sw_status = tk.Label(
+            bot, text="No sessions scheduled",
+            font=("Segoe UI", 9), fg=TEXT_DIM, bg=BG_MEDIUM,
+        )
+        self._sw_status.pack(side="left")
+
+        btn_s = dict(
+            font=("Segoe UI", 9), relief="flat", cursor="hand2",
+            padx=10, pady=3,
+        )
+        tk.Button(
+            bot, text="Clear Completed",
+            bg=BG_LIGHT, fg=TEXT_DIM,
+            activebackground=BG_DARK, activeforeground=TEXT_DIM,
+            command=self._sched_clear_completed, **btn_s,
+        ).pack(side="right", padx=(4, 0))
+        tk.Button(
+            bot, text="DT Generalist Run",
+            bg=BG_LIGHT, fg=ACCENT_ORANGE,
+            activebackground=BG_DARK, activeforeground=ACCENT_ORANGE,
+            command=self._sched_dt_run, **btn_s,
+        ).pack(side="right", padx=(4, 0))
+        tk.Button(
+            bot, text="Overnight All Games",
+            bg=BG_LIGHT, fg=ACCENT_BLUE,
+            activebackground=BG_DARK, activeforeground=ACCENT_BLUE,
+            command=self._sched_overnight, **btn_s,
+        ).pack(side="right", padx=(4, 0))
+        tk.Button(
+            bot, text="\u25b6  Run All",
+            bg=ACCENT_BLUE, fg=BG_DARK,
+            activebackground="#3d8ee6", activeforeground=BG_DARK,
+            font=("Segoe UI", 9, "bold"),
+            command=self._sched_run_all, relief="flat",
+            cursor="hand2", padx=12, pady=3,
+        ).pack(side="right", padx=(4, 0))
+        tk.Button(
+            bot, text="\u25b6  Run Next",
+            bg=ACCENT_GREEN, fg=BG_DARK,
+            activebackground="#4bb569", activeforeground=BG_DARK,
+            font=("Segoe UI", 9, "bold"),
+            command=self._sched_run_next, relief="flat",
+            cursor="hand2", padx=12, pady=3,
+        ).pack(side="right", padx=(4, 0))
+
+        # Populate the queue
         self._refresh_schedule_list()
 
-    def _toggle_schedule(self):
-        """Show/hide the schedule panel."""
-        if self._sched_expanded:
-            self.sched_content.pack_forget()
-            self.sched_arrow.configure(text="▸  Training Schedule")
-            self._sched_expanded = False
-        else:
-            self.sched_content.pack(fill="x", before=self._start_area_sep)
-            self.sched_arrow.configure(text="▾  Training Schedule")
-            self._sched_expanded = True
+    def _close_schedule_window(self):
+        """Close the schedule window cleanly."""
+        if self._schedule_window is not None:
+            try:
+                self._schedule_window.destroy()
+            except tk.TclError:
+                pass
+            self._schedule_window = None
+
+    def _toggle_datetime_fields(self):
+        """Enable/disable date-time dropdowns based on 'immediate' checkbox."""
+        is_imm = self._sched_form['immediate'].get()
+        new_state = "disabled" if is_imm else "readonly"
+        for w in self._sched_dt_widgets:
+            w.configure(state=new_state)
+
+    @staticmethod
+    def _format_scheduled_time(dt_obj):
+        """Format a datetime for display: 'Mar 20 at 14:30' or 'Immediate'."""
+        if dt_obj is None:
+            return "Immediate"
+        return dt_obj.strftime("%b %d at %H:%M")
+
+    # ---------------------------------------------------------------
+    # Session queue refresh
+    # ---------------------------------------------------------------
 
     def _refresh_schedule_list(self):
         """Refresh the session queue display from CalendarStore."""
-        # Clear existing rows
-        for widget in self.sched_list_frame.winfo_children():
+        # Guard: the list widget may not exist yet
+        if not hasattr(self, '_sw_inner'):
+            return
+
+        for widget in self._sw_inner.winfo_children():
             widget.destroy()
 
         if not self._calendar_store:
             tk.Label(
-                self.sched_list_frame,
+                self._sw_inner,
                 text="  Schedule system unavailable",
                 font=("Segoe UI", 9), fg=ACCENT_RED, bg=BG_DARK,
             ).pack(anchor="w")
+            self._update_schedule_status()
             return
 
         sessions = self._calendar_store.get_all_sessions()
         if not sessions:
             tk.Label(
-                self.sched_list_frame,
-                text="  No sessions — use presets or 'Add Current Settings' above",
+                self._sw_inner,
+                text="  No sessions \u2014 add one above or use a quick preset",
                 font=("Segoe UI", 9, "italic"), fg=TEXT_DIM, bg=BG_DARK,
-            ).pack(anchor="w", pady=8)
-            self.sched_status.config(text="No sessions scheduled")
+            ).pack(anchor="w", pady=12)
+            self._update_schedule_status()
             return
 
         status_colors = {
@@ -1185,58 +1363,235 @@ class MarioLauncher:
 
         for i, session in enumerate(sessions):
             row_bg = BG_DARK if i % 2 == 0 else BG_MEDIUM
-            row = tk.Frame(self.sched_list_frame, bg=row_bg)
+            row = tk.Frame(self._sw_inner, bg=row_bg)
             row.pack(fill="x")
 
-            row_style = dict(font=("Segoe UI", 9), bg=row_bg, pady=2)
-            tk.Label(row, text=f"  {i + 1}", width=3, anchor="w",
-                     fg=TEXT_DIM, **row_style).pack(side="left")
-            tk.Label(row, text=session.game_id, width=12, anchor="w",
-                     fg=TEXT_PRIMARY, **row_style).pack(side="left")
-            tk.Label(row, text=session.algorithm.upper(), width=10, anchor="w",
-                     fg=ALGO_INFO.get(session.algorithm, {}).get('color', TEXT_PRIMARY),
-                     **row_style).pack(side="left")
-            tk.Label(row, text=str(session.episodes), width=10, anchor="w",
-                     fg=TEXT_PRIMARY, **row_style).pack(side="left")
-            stream_text = "Yes" if session.stream else "—"
-            tk.Label(row, text=stream_text, width=6, anchor="w",
+            rs = dict(font=("Segoe UI", 9), bg=row_bg, pady=2)
+            tk.Label(row, text=f" {i + 1}", width=3, anchor="w",
+                     fg=TEXT_DIM, **rs).pack(side="left")
+            tk.Label(row, text=session.game_id, width=10, anchor="w",
+                     fg=TEXT_PRIMARY, **rs).pack(side="left")
+            tk.Label(
+                row, text=session.algorithm.upper(), width=9, anchor="w",
+                fg=ALGO_INFO.get(session.algorithm, {}).get(
+                    'color', TEXT_PRIMARY),
+                **rs,
+            ).pack(side="left")
+            tk.Label(row, text=str(session.episodes), width=8, anchor="w",
+                     fg=TEXT_PRIMARY, **rs).pack(side="left")
+            tk.Label(
+                row,
+                text=self._format_scheduled_time(session.scheduled_start),
+                width=16, anchor="w", fg=TEXT_PRIMARY, **rs,
+            ).pack(side="left")
+            stream_txt = "Yes" if session.stream else "\u2014"
+            tk.Label(row, text=stream_txt, width=6, anchor="w",
                      fg=ACCENT_RED if session.stream else TEXT_DIM,
-                     **row_style).pack(side="left")
-            tk.Label(row, text=session.status.capitalize(), width=10, anchor="w",
-                     fg=status_colors.get(session.status, TEXT_DIM),
-                     **row_style).pack(side="left")
+                     **rs).pack(side="left")
+            tk.Label(
+                row, text=session.status.capitalize(), width=10, anchor="w",
+                fg=status_colors.get(session.status, TEXT_DIM), **rs,
+            ).pack(side="left")
 
-            # Remove button
+            # Actions: Edit + Remove
+            act = tk.Frame(row, bg=row_bg)
+            act.pack(side="left")
             tk.Button(
-                row, text="✕", font=("Segoe UI", 8),
+                act, text="\u270e", font=("Segoe UI", 9),
+                bg=row_bg, fg=ACCENT_BLUE,
+                activebackground=row_bg, activeforeground="#3d8ee6",
+                relief="flat", cursor="hand2", padx=3,
+                command=lambda sid=session.session_id: self._open_session_editor(sid),
+            ).pack(side="left")
+            tk.Button(
+                act, text="\u2715", font=("Segoe UI", 9),
                 bg=row_bg, fg=ACCENT_RED,
                 activebackground=row_bg, activeforeground="#ff6b7a",
-                relief="flat", cursor="hand2", padx=4,
+                relief="flat", cursor="hand2", padx=3,
                 command=lambda sid=session.session_id: self._sched_remove(sid),
-            ).pack(side="right", padx=(0, 5))
+            ).pack(side="left")
 
+        self._update_schedule_status()
+
+    def _update_schedule_status(self):
+        """Update the status label at the bottom of the schedule window."""
+        if not hasattr(self, '_sw_status'):
+            return
+        if not self._calendar_store:
+            self._sw_status.config(text="Schedule system unavailable")
+            return
+        sessions = self._calendar_store.get_all_sessions()
         pending = sum(1 for s in sessions if s.status == 'pending')
-        self.sched_status.config(
-            text=f"{pending} session{'s' if pending != 1 else ''} pending"
-        )
+        if pending:
+            self._sw_status.config(
+                text=f"{pending} session{'s' if pending != 1 else ''} pending")
+        else:
+            self._sw_status.config(text="No sessions scheduled")
 
-    def _sched_add_current(self):
-        """Add a session matching current launcher settings to the queue."""
+    # ---------------------------------------------------------------
+    # Session Editor Dialog
+    # ---------------------------------------------------------------
+
+    def _open_session_editor(self, session_id):
+        """Open a small Toplevel to edit an existing session's fields."""
+        if not self._calendar_store:
+            return
+        session = self._calendar_store.get_session(session_id)
+        if session is None:
+            return
+
+        ed = tk.Toplevel(self._schedule_window or self.root)
+        ed.title("Edit Session")
+        ed.configure(bg=BG_DARK)
+        ed.geometry("340x310")
+        ed.resizable(False, False)
+        if self._schedule_window:
+            ed.transient(self._schedule_window)
+
+        pad = dict(padx=12, pady=(6, 0))
+        lbl_s = dict(font=("Segoe UI", 8, "bold"), fg=TEXT_DIM, bg=BG_DARK)
+
+        tk.Label(ed, text="Game", **lbl_s).pack(anchor="w", **pad)
+        game_ids = [g.game_id for g in self.available_games]
+        ed_game = tk.StringVar(value=session.game_id)
+        ttk.Combobox(ed, textvariable=ed_game, values=game_ids,
+                     state="readonly", width=20).pack(anchor="w", padx=12)
+
+        tk.Label(ed, text="Algorithm", **lbl_s).pack(anchor="w", **pad)
+        algo_names = list(ALGO_INFO.keys())
+        ed_algo = tk.StringVar(value=session.algorithm)
+        ttk.Combobox(ed, textvariable=ed_algo, values=algo_names,
+                     state="readonly", width=20).pack(anchor="w", padx=12)
+
+        tk.Label(ed, text="Episodes", **lbl_s).pack(anchor="w", **pad)
+        ed_ep = tk.StringVar(value=str(session.episodes))
+        tk.Entry(ed, textvariable=ed_ep, width=22,
+                 bg=BG_LIGHT, fg=TEXT_PRIMARY,
+                 insertbackground=TEXT_PRIMARY, relief="flat"
+                 ).pack(anchor="w", padx=12)
+
+        # Date / Time
+        tk.Label(ed, text="Date / Time", **lbl_s).pack(anchor="w", **pad)
+        dt_row = tk.Frame(ed, bg=BG_DARK)
+        dt_row.pack(anchor="w", padx=12)
+
+        from datetime import datetime as _dt
+        ref = session.scheduled_start or _dt.now()
+
+        years = [str(y) for y in range(2024, 2028)]
+        months = [f'{m:02d}' for m in range(1, 13)]
+        days_list = [f'{d:02d}' for d in range(1, 32)]
+        hours_list = [f'{h:02d}' for h in range(24)]
+        minutes_list = [f'{m:02d}' for m in range(0, 60, 5)]
+
+        ed_yr = tk.StringVar(value=str(ref.year))
+        ed_mo = tk.StringVar(value=f'{ref.month:02d}')
+        ed_dy = tk.StringVar(value=f'{ref.day:02d}')
+        ed_hr = tk.StringVar(value=f'{ref.hour:02d}')
+        ed_mn = tk.StringVar(value=f'{(ref.minute // 5) * 5:02d}')
+
+        ttk.Combobox(dt_row, textvariable=ed_yr, values=years,
+                     state="readonly", width=5).pack(side="left", padx=(0, 2))
+        ttk.Combobox(dt_row, textvariable=ed_mo, values=months,
+                     state="readonly", width=3).pack(side="left", padx=(0, 2))
+        ttk.Combobox(dt_row, textvariable=ed_dy, values=days_list,
+                     state="readonly", width=3).pack(side="left", padx=(0, 6))
+        ttk.Combobox(dt_row, textvariable=ed_hr, values=hours_list,
+                     state="readonly", width=3).pack(side="left", padx=(0, 1))
+        tk.Label(dt_row, text=":", fg=TEXT_DIM, bg=BG_DARK,
+                 font=("Segoe UI", 9, "bold")).pack(side="left")
+        ttk.Combobox(dt_row, textvariable=ed_mn, values=minutes_list,
+                     state="readonly", width=3).pack(side="left")
+
+        # Stream
+        ed_stream = tk.BooleanVar(value=session.stream)
+        tk.Checkbutton(
+            ed, text="Stream", variable=ed_stream,
+            font=("Segoe UI", 9), fg=TEXT_PRIMARY, bg=BG_DARK,
+            selectcolor=BG_MEDIUM, activebackground=BG_DARK,
+            activeforeground=TEXT_PRIMARY,
+        ).pack(anchor="w", padx=12, pady=(8, 0))
+
+        # Buttons
+        btn_row = tk.Frame(ed, bg=BG_DARK)
+        btn_row.pack(fill="x", padx=12, pady=(12, 10))
+
+        def _save_edit():
+            try:
+                new_start = _dt(
+                    int(ed_yr.get()), int(ed_mo.get()), int(ed_dy.get()),
+                    int(ed_hr.get()), int(ed_mn.get()),
+                )
+            except (ValueError, TypeError):
+                new_start = None
+            ep = ed_ep.get().strip()
+            episodes = int(ep) if ep.isdigit() else session.episodes
+            self._calendar_store.update_session(
+                session_id,
+                game_id=ed_game.get(),
+                algorithm=ed_algo.get(),
+                episodes=episodes,
+                scheduled_start=new_start,
+                stream=ed_stream.get(),
+            )
+            self._refresh_schedule_list()
+            ed.destroy()
+
+        tk.Button(
+            btn_row, text="Save",
+            font=("Segoe UI", 9, "bold"),
+            bg=ACCENT_GREEN, fg=BG_DARK,
+            activebackground="#4bb569", activeforeground=BG_DARK,
+            relief="flat", cursor="hand2", padx=14, pady=3,
+            command=_save_edit,
+        ).pack(side="left", padx=(0, 6))
+        tk.Button(
+            btn_row, text="Cancel",
+            font=("Segoe UI", 9),
+            bg=BG_MEDIUM, fg=TEXT_PRIMARY,
+            activebackground=BG_LIGHT, activeforeground=TEXT_PRIMARY,
+            relief="flat", cursor="hand2", padx=14, pady=3,
+            command=ed.destroy,
+        ).pack(side="left")
+
+    # ---------------------------------------------------------------
+    # Schedule actions
+    # ---------------------------------------------------------------
+
+    def _sched_add_from_form(self):
+        """Add a session from the add-session form in the schedule window."""
         if not self._calendar_store:
             return
         try:
+            from datetime import datetime as _dt
             from src.scheduler.session import create_session
-            game_text = self.game_combo.get()
-            game_id = game_text.rsplit("(", 1)[-1].rstrip(")").strip() if "(" in game_text else "mario"
-            algo = self.selected_algo.get()
-            duration = self.duration_var.get().strip()
-            episodes = int(duration) if duration else 1000
-            stream = self.stream_var.get()
+
+            game_id = self._sched_form['game'].get()
+            algo = self._sched_form['algo'].get()
+            ep = self._sched_form['episodes'].get().strip()
+            episodes = int(ep) if ep.isdigit() else 1000
+            stream = self._sched_form['stream'].get()
+            immediate = self._sched_form['immediate'].get()
+
+            scheduled_start = None
+            if not immediate:
+                try:
+                    scheduled_start = _dt(
+                        int(self._sched_form['year'].get()),
+                        int(self._sched_form['month'].get()),
+                        int(self._sched_form['day'].get()),
+                        int(self._sched_form['hour'].get()),
+                        int(self._sched_form['minute'].get()),
+                    )
+                except (ValueError, TypeError):
+                    pass
+
             session = create_session(
                 game_id=game_id,
                 algorithm=algo,
                 episodes=episodes,
                 stream=stream,
+                scheduled_start=scheduled_start,
             )
             self._calendar_store.add_session(session)
             self._refresh_schedule_list()
@@ -1273,54 +1628,59 @@ class MarioLauncher:
             self._calendar_store.remove_session(session_id)
             self._refresh_schedule_list()
 
-    def _sched_clear(self):
-        """Clear all sessions from the queue."""
+    def _sched_clear_completed(self):
+        """Remove all completed/failed/cancelled sessions."""
         if not self._calendar_store:
             return
-        for session in self._calendar_store.get_all_sessions():
-            self._calendar_store.remove_session(session.session_id)
+        self._calendar_store.clear_completed()
         self._refresh_schedule_list()
 
-    def _sched_run(self):
+    def _sched_apply_session(self, session):
+        """Apply a session's settings to the launcher and start training."""
+        self.game_var.set(session.game_id)
+        for i, game_info in enumerate(self.available_games):
+            if game_info.game_id == session.game_id:
+                self.game_combo.current(i)
+                self._on_game_changed()
+                break
+        self.selected_algo.set(session.algorithm)
+        self._select_algorithm(session.algorithm)
+        self.duration_var.set(str(session.episodes))
+        self.stream_var.set(session.stream)
+
+        from datetime import datetime
+        self._calendar_store.update_session(
+            session.session_id,
+            status='running',
+            actual_start=datetime.now(),
+        )
+        self._refresh_schedule_list()
+        self._start_training()
+
+    def _sched_run_next(self):
         """Run the next pending session from the schedule."""
         if not self._calendar_store:
             return
         next_session = self._calendar_store.get_next_session()
         if not next_session:
-            # Also check for any pending sessions (get_next only returns
-            # sessions with a scheduled_start). Fall back to first pending.
             pending = self._calendar_store.get_pending_sessions()
             if pending:
                 next_session = pending[0]
-
         if not next_session:
             self._set_status("No pending sessions to run.", TEXT_DIM)
             return
+        self._sched_apply_session(next_session)
 
-        # Apply session settings to the launcher and start training
-        self.game_var.set(next_session.game_id)
-        # Find the game in the combo and select it
-        for i, game_info in enumerate(self.available_games):
-            if game_info['id'] == next_session.game_id:
-                self.game_combo.current(i)
-                self._on_game_changed()
-                break
-        self.selected_algo.set(next_session.algorithm)
-        self._select_algorithm(next_session.algorithm)
-        self.duration_var.set(str(next_session.episodes))
-        self.stream_var.set(next_session.stream)
-
-        # Mark as running in store
-        from datetime import datetime
-        self._calendar_store.update_session(
-            next_session.session_id,
-            status='running',
-            actual_start=datetime.now(),
-        )
-        self._refresh_schedule_list()
-
-        # Start training
-        self._start_training()
+    def _sched_run_all(self):
+        """Run all pending sessions sequentially (starts the first one)."""
+        if not self._calendar_store:
+            return
+        pending = self._calendar_store.get_pending_sessions()
+        if not pending:
+            self._set_status("No pending sessions to run.", TEXT_DIM)
+            return
+        # Start the first; the completion callback should chain the rest
+        self._sched_apply_session(pending[0])
 
     def _build_start_area(self):
         """Always-visible START/STOP button and status bar at the bottom."""
