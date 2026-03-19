@@ -244,6 +244,29 @@ class MarioLauncher:
         self.root.resizable(True, True)
         self.root.minsize(800, 550)
 
+        # Configure ttk styles for dark theme
+        style = ttk.Style()
+        style.theme_use('clam')  # 'clam' is the most customizable ttk theme
+        style.configure('TCombobox',
+            fieldbackground=BG_LIGHT,
+            background=BG_MEDIUM,
+            foreground=TEXT_PRIMARY,
+            arrowcolor=TEXT_PRIMARY,
+            selectbackground=BG_LIGHT,
+            selectforeground=TEXT_PRIMARY,
+        )
+        style.map('TCombobox',
+            fieldbackground=[('readonly', BG_LIGHT)],
+            selectbackground=[('readonly', BG_LIGHT)],
+            selectforeground=[('readonly', TEXT_PRIMARY)],
+            foreground=[('readonly', TEXT_PRIMARY)],
+        )
+        # Style the dropdown list
+        self.root.option_add('*TCombobox*Listbox.background', BG_MEDIUM)
+        self.root.option_add('*TCombobox*Listbox.foreground', TEXT_PRIMARY)
+        self.root.option_add('*TCombobox*Listbox.selectBackground', BG_LIGHT)
+        self.root.option_add('*TCombobox*Listbox.selectForeground', TEXT_PRIMARY)
+
         # Track the training subprocess (None when idle)
         self.process = None
 
@@ -496,6 +519,30 @@ class MarioLauncher:
         )
         self.device_label.pack(side="right", anchor="e")
 
+        # Session count badge (updated dynamically)
+        self.session_badge = tk.Label(
+            header,
+            text="",
+            font=("Segoe UI", 8, "bold"),
+            fg=BG_DARK, bg=ACCENT_BLUE,
+            padx=6, pady=2,
+        )
+        # Hidden by default, shown when sessions are pending
+        self._update_session_badge()
+
+    def _update_session_badge(self):
+        """Show/hide session count badge in header."""
+        try:
+            if hasattr(self, '_calendar_store') and self._calendar_store:
+                pending = len(self._calendar_store.get_pending_sessions())
+                if pending > 0:
+                    self.session_badge.config(text=f"{pending} scheduled")
+                    self.session_badge.pack(side="right", padx=(0, 8))
+                    return
+        except Exception:
+            pass
+        self.session_badge.pack_forget()
+
     def _detect_device_label(self):
         """Detect available compute device and return (label_text, color)."""
         try:
@@ -545,10 +592,7 @@ class MarioLauncher:
         """Left column: GAME selector + ALGORITHM picker + DURATION."""
 
         # ── Game selector ──────────────────────────────────────────────
-        tk.Label(
-            parent, text="GAME",
-            font=("Segoe UI", 8, "bold"), fg=TEXT_DIM, bg=BG_DARK,
-        ).pack(anchor="w")
+        self._section_label(parent, "GAME")
 
         game_names = [f"{g.name} ({g.game_id})" for g in self.available_games]
         if not game_names:
@@ -595,12 +639,7 @@ class MarioLauncher:
         )
 
         # ── Algorithm selector ─────────────────────────────────────────
-        hdr = tk.Frame(parent, bg=BG_DARK)
-        hdr.pack(fill="x")
-        tk.Label(
-            hdr, text="ALGORITHM",
-            font=("Segoe UI", 8, "bold"), fg=TEXT_DIM, bg=BG_DARK,
-        ).pack(side="left")
+        hdr = self._section_label(parent, "ALGORITHM")
         tk.Label(
             hdr, text="(hover for details)",
             font=("Segoe UI", 8), fg=TEXT_DIM, bg=BG_DARK,
@@ -672,11 +711,7 @@ class MarioLauncher:
         )
 
         # ── Duration entry ─────────────────────────────────────────────
-        self.duration_label = tk.Label(
-            parent, text="TRAINING DURATION",
-            font=("Segoe UI", 8, "bold"), fg=TEXT_DIM, bg=BG_DARK,
-        )
-        self.duration_label.pack(anchor="w")
+        self.duration_label = self._section_label(parent, "TRAINING DURATION")
 
         dur_row = tk.Frame(parent, bg=BG_DARK)
         dur_row.pack(fill="x", pady=(3, 0))
@@ -710,10 +745,7 @@ class MarioLauncher:
         """Right column: TRAINING OPTIONS + COMPUTE + LOAD MODEL."""
 
         # ── Training options ───────────────────────────────────────────
-        tk.Label(
-            parent, text="TRAINING OPTIONS",
-            font=("Segoe UI", 8, "bold"), fg=TEXT_DIM, bg=BG_DARK,
-        ).pack(anchor="w")
+        self._section_label(parent, "TRAINING OPTIONS")
 
         _cb = dict(
             font=("Segoe UI", 10), fg=TEXT_PRIMARY, bg=BG_DARK,
@@ -744,10 +776,7 @@ class MarioLauncher:
         # ── Opponent (board games) ───────────────────────────────────
         self.opponent_frame = tk.Frame(parent, bg=BG_DARK)
         # Initially hidden — shown only for board games via _update_opponent_visibility
-        tk.Label(
-            self.opponent_frame, text="OPPONENT  (board games only)",
-            font=("Segoe UI", 8, "bold"), fg=TEXT_DIM, bg=BG_DARK,
-        ).pack(anchor="w")
+        self._section_label(self.opponent_frame, "OPPONENT")
 
         opp_row = tk.Frame(self.opponent_frame, bg=BG_DARK)
         opp_row.pack(fill="x", pady=(4, 0))
@@ -789,10 +818,7 @@ class MarioLauncher:
         )
 
         # ── Compute ────────────────────────────────────────────────────
-        tk.Label(
-            parent, text="COMPUTE",
-            font=("Segoe UI", 8, "bold"), fg=TEXT_DIM, bg=BG_DARK,
-        ).pack(anchor="w")
+        self._section_label(parent, "COMPUTE")
 
         compute_row = tk.Frame(parent, bg=BG_DARK)
         compute_row.pack(fill="x", pady=(4, 0))
@@ -823,10 +849,7 @@ class MarioLauncher:
         )
 
         # ── Model loader ───────────────────────────────────────────────
-        tk.Label(
-            parent, text="LOAD MODEL",
-            font=("Segoe UI", 8, "bold"), fg=TEXT_DIM, bg=BG_DARK,
-        ).pack(anchor="w")
+        self._section_label(parent, "LOAD MODEL")
 
         model_row = tk.Frame(parent, bg=BG_DARK)
         model_row.pack(fill="x", pady=(4, 0))
@@ -954,33 +977,54 @@ class MarioLauncher:
         )
         self.rom_status.pack(anchor="w", pady=(2, 0))
 
-        # ── Quick access ───────────────────────────────────────────────
+        # ── Tools & Features ──────────────────────────────────────────
         right_col = tk.Frame(inner, bg=BG_DARK)
         right_col.grid(row=0, column=2, sticky="nw", padx=(15, 0))
 
         tk.Label(
-            right_col, text="QUICK ACCESS",
+            right_col, text="TOOLS & FEATURES",
             font=("Segoe UI", 8, "bold"), fg=TEXT_DIM, bg=BG_DARK,
         ).pack(anchor="w")
 
-        for label, cmd in [
-            ("Open Models Folder",     lambda: self._open_folder(MODELS_DIR)),
-            ("Open Recordings Folder", lambda: self._open_folder(RECORDINGS_DIR)),
-            ("Compare Runs",           self._open_comparison),
-            ("Add Game...",            self._add_game_wizard),
-            ("Tournament",             self._open_tournament),
-            ("Agent Gallery",          self._open_agent_gallery),
-            ("Export Agent",           self._export_agent),
-            ("Import Agent",           self._import_agent),
-            ("Highlight Reel",         self._generate_highlight_reel),
-        ]:
-            tk.Button(
-                right_col, text=label,
-                font=("Segoe UI", 9), bg=BG_MEDIUM, fg=TEXT_DIM,
+        tools_grid = tk.Frame(right_col, bg=BG_DARK)
+        tools_grid.pack(fill="x", pady=(4, 0))
+
+        tool_items = [
+            ("Tournament",      self._open_tournament,        ACCENT_BLUE),
+            ("Agent Gallery",   self._open_agent_gallery,     ACCENT_GREEN),
+            ("Export Agent",    self._export_agent,            TEXT_DIM),
+            ("Import Agent",    self._import_agent,            TEXT_DIM),
+            ("Highlight Reel",  self._generate_highlight_reel, ACCENT_ORANGE),
+            ("Compare Runs",    self._open_comparison,         TEXT_DIM),
+            ("Add Game...",     self._add_game_wizard,         TEXT_DIM),
+        ]
+
+        for i, (label, cmd, color) in enumerate(tool_items):
+            row, col = divmod(i, 2)
+            btn = tk.Button(
+                tools_grid, text=label,
+                font=("Segoe UI", 8), bg=BG_MEDIUM, fg=color,
                 activebackground=BG_LIGHT, activeforeground=TEXT_PRIMARY,
-                relief="flat", cursor="hand2", padx=8, pady=3,
+                relief="flat", cursor="hand2", padx=6, pady=3, anchor="w",
                 command=cmd,
-            ).pack(anchor="w", fill="x", pady=2)
+            )
+            btn.grid(row=row, column=col, sticky="ew", padx=2, pady=1)
+
+        tools_grid.columnconfigure(0, weight=1)
+        tools_grid.columnconfigure(1, weight=1)
+
+        # Folder shortcuts (smaller, subtle)
+        tk.Frame(right_col, bg=BORDER_COLOR, height=1).pack(fill="x", pady=(6, 4))
+        folders_row = tk.Frame(right_col, bg=BG_DARK)
+        folders_row.pack(fill="x")
+        for label, folder in [("Models", MODELS_DIR), ("Recordings", RECORDINGS_DIR)]:
+            tk.Button(
+                folders_row, text=f"Open {label}",
+                font=("Segoe UI", 7), bg=BG_DARK, fg=TEXT_DIM,
+                activebackground=BG_MEDIUM, activeforeground=TEXT_PRIMARY,
+                relief="flat", cursor="hand2", padx=4, pady=1,
+                command=lambda f=folder: self._open_folder(f),
+            ).pack(side="left", padx=(0, 6))
 
     def _toggle_extras(self, save=True):
         """Show/hide the extras panel."""
@@ -1427,6 +1471,8 @@ class MarioLauncher:
                 text=f"{pending} session{'s' if pending != 1 else ''} pending")
         else:
             self._sw_status.config(text="No sessions scheduled")
+        # Also update the header badge
+        self._update_session_badge()
 
     # ---------------------------------------------------------------
     # Session Editor Dialog
@@ -1742,14 +1788,14 @@ class MarioLauncher:
         self.start_btn = tk.Button(
             area,
             text="\u25B6   START TRAINING",
-            font=("Segoe UI", 14, "bold"),
+            font=("Segoe UI", 15, "bold"),
             bg=ACCENT_GREEN,
-            fg=BG_DARK,
+            fg="#0a0a1a",
             activebackground="#00b863",
-            activeforeground=BG_DARK,
+            activeforeground="#0a0a1a",
             relief="flat",
             cursor="hand2",
-            pady=10,
+            pady=12,
             command=self._on_start_stop,
         )
         self.start_btn.pack(fill="x")
@@ -1757,6 +1803,23 @@ class MarioLauncher:
     # ===================================================================
     # Helper Methods
     # ===================================================================
+
+    def _section_label(self, parent, text, color=TEXT_DIM):
+        """Create a section header with a subtle left accent bar."""
+        frame = tk.Frame(parent, bg=BG_DARK)
+        frame.pack(anchor="w", fill="x")
+        tk.Frame(frame, bg=color, width=3, height=12).pack(side="left", padx=(0, 6))
+        tk.Label(
+            frame, text=text,
+            font=("Segoe UI", 8, "bold"), fg=color, bg=BG_DARK,
+        ).pack(side="left")
+        return frame
+
+    @staticmethod
+    def _add_hover(widget, enter_bg, leave_bg):
+        """Add hover color change to a widget (additive, won't replace other bindings)."""
+        widget.bind('<Enter>', lambda e: widget.configure(bg=enter_bg), add='+')
+        widget.bind('<Leave>', lambda e: widget.configure(bg=leave_bg), add='+')
 
     def _update_algo_desc(self):
         """Update the algorithm description text below the buttons."""
@@ -2017,13 +2080,17 @@ class MarioLauncher:
         supported = adapter.supported_algorithms() if adapter else list(ALGO_INFO.keys())
 
         for algo, btn in self.algo_buttons.items():
+            # Clear all previous bindings then re-establish
+            btn.unbind('<Enter>')
+            btn.unbind('<Leave>')
+            info = ALGO_INFO[algo]
             if algo not in supported:
                 btn.configure(
                     bg=BG_DARK, fg="#555555", activebackground=BG_DARK,
                     state="disabled",
                 )
             elif algo == current:
-                color = ALGO_INFO[algo]["color"]
+                color = info["color"]
                 btn.configure(
                     bg=color, fg=BG_DARK, activebackground=color,
                     state="normal",
@@ -2033,6 +2100,11 @@ class MarioLauncher:
                     bg=BG_MEDIUM, fg=TEXT_DIM, activebackground=BG_LIGHT,
                     state="normal",
                 )
+                # Tooltip first (replaces), then hover (additive)
+                self._bind_tooltip(btn, info["tooltip"])
+                self._add_hover(btn, BG_LIGHT, BG_MEDIUM)
+                continue
+            self._bind_tooltip(btn, info["tooltip"])
 
     def _on_preset_changed(self, event=None):
         """Handle training preset selection change."""
@@ -3028,45 +3100,8 @@ class MarioLauncher:
         self.root.mainloop()
 
 # -----------------------------------------------------------------------
-# Apply a dark theme to ttk widgets (comboboxes, etc.)
-# -----------------------------------------------------------------------
-def apply_dark_theme(root):
-    """
-    Configure ttk Style for a dark theme.
-
-    tkinter's ttk widgets use a separate theming system. This sets up
-    dark colors so comboboxes etc. match the rest of the GUI.
-    """
-    style = ttk.Style(root)
-
-    # Use 'clam' theme as base — it's the most customizable
-    style.theme_use("clam")
-
-    # Combobox styling
-    style.configure(
-        "TCombobox",
-        fieldbackground=BG_LIGHT,
-        background=BG_MEDIUM,
-        foreground=TEXT_PRIMARY,
-        arrowcolor=TEXT_PRIMARY,
-        borderwidth=0,
-    )
-    style.map(
-        "TCombobox",
-        fieldbackground=[("readonly", BG_LIGHT)],
-        foreground=[("readonly", TEXT_PRIMARY)],
-        selectbackground=[("readonly", BG_LIGHT)],
-        selectforeground=[("readonly", TEXT_PRIMARY)],
-    )
-
-    # General frame styling
-    style.configure("TFrame", background=BG_DARK)
-    style.configure("TLabel", background=BG_DARK, foreground=TEXT_PRIMARY)
-
-# -----------------------------------------------------------------------
 # Entry point
 # -----------------------------------------------------------------------
 if __name__ == "__main__":
     app = MarioLauncher()
-    apply_dark_theme(app.root)
     app.run()
