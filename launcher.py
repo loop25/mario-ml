@@ -972,6 +972,7 @@ class MarioLauncher:
             ("Agent Gallery",          self._open_agent_gallery),
             ("Export Agent",           self._export_agent),
             ("Import Agent",           self._import_agent),
+            ("Highlight Reel",         self._generate_highlight_reel),
         ]:
             tk.Button(
                 right_col, text=label,
@@ -1891,6 +1892,34 @@ class MarioLauncher:
             messagebox.showinfo("Import Successful", f"Agent imported to:\n{dest}")
         except Exception as e:
             messagebox.showerror("Import Failed", str(e))
+
+    def _generate_highlight_reel(self):
+        """Generate highlight reel from a recording + markers file."""
+        recording = filedialog.askopenfilename(
+            title="Select Recording",
+            initialdir=RECORDINGS_DIR,
+            filetypes=[("Video Files", "*.mp4 *.avi"), ("All Files", "*.*")],
+        )
+        if not recording:
+            return
+
+        # Look for markers sidecar
+        base = os.path.splitext(recording)[0]
+        markers_path = f"{base}_markers.json"
+        if not os.path.isfile(markers_path):
+            messagebox.showwarning("No Markers",
+                "No milestone markers found for this recording.\n"
+                "Train with achievements enabled to generate markers.")
+            return
+
+        try:
+            from src.recording.highlight_reel import HighlightReel
+            reel = HighlightReel()
+            output = reel.generate_reel(recording, markers_path)
+            self._set_status(f"Highlight reel saved: {os.path.basename(output)}", ACCENT_GREEN)
+            messagebox.showinfo("Highlight Reel", f"Reel saved to:\n{output}")
+        except Exception as e:
+            messagebox.showerror("Reel Error", str(e))
 
     def _open_tournament(self):
         """Open tournament setup dialog."""
