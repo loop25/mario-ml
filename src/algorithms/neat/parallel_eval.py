@@ -100,17 +100,19 @@ class MultiEnvGenomeEvaluator:
         # Create N environments in the same process.
         # Pump pygame events between env creations so Windows doesn't
         # flag the window as "Not Responding" during setup.
-        try:
-            import pygame
-            _pump = pygame.event.pump
-        except (ImportError, Exception):
-            _pump = lambda: None
+        def _safe_pump():
+            try:
+                import pygame
+                if pygame.get_init() and pygame.display.get_init():
+                    pygame.event.pump()
+            except Exception:
+                pass
 
         self.envs = []
         for i in range(num_envs):
             env = create_neat_env(world=world, stage=stage)
             self.envs.append(env)
-            _pump()  # Keep window responsive
+            _safe_pump()  # Keep window responsive
 
         print(f'  Created {num_envs} environments for multi-env NEAT evaluation.')
 

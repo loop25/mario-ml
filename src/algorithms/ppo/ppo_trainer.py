@@ -448,11 +448,13 @@ class PPOTrainer(BaseTrainer):
             # Store extra envs so we can access .unwrapped for frames.
             # Pump pygame events between env creations to prevent
             # Windows "Not Responding" during long setup.
-            try:
-                import pygame
-                _pump = pygame.event.pump
-            except (ImportError, Exception):
-                _pump = lambda: None
+            def _safe_pump():
+                try:
+                    import pygame
+                    if pygame.get_init() and pygame.display.get_init():
+                        pygame.event.pump()
+                except Exception:
+                    pass
 
             self._extra_envs = []
             env_wrappers = [SB3CompatWrapper(env)]  # First env is the one passed in
@@ -461,7 +463,7 @@ class PPOTrainer(BaseTrainer):
                 new_env = create_cnn_env(world=world, stage=stage)
                 self._extra_envs.append(new_env)
                 env_wrappers.append(SB3CompatWrapper(new_env))
-                _pump()  # Keep window responsive
+                _safe_pump()  # Keep window responsive
 
             # Use DummyVecEnv — all envs run in the main process.
             # Each lambda captures its own wrapper instance.

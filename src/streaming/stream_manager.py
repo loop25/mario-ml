@@ -120,16 +120,24 @@ class StreamManager:
         cmd += ['-c:a', 'aac', '-b:a', '128k', '-ar', '44100']
 
         # Build output destinations
-        destinations = []
-        if self.twitch_key:
-            destinations.append(f'[f=flv]{self.TWITCH_RTMP}/{self.twitch_key}')
-        if self.youtube_key:
-            destinations.append(f'[f=flv]{self.YOUTUBE_RTMP}/{self.youtube_key}')
+        # When streaming to a single destination, use plain flv output.
+        # When streaming to multiple, use ffmpeg's tee muxer.
+        # On Windows the tee muxer's pipe-separated URL string must be
+        # carefully constructed — each destination is [f=flv]<url> and
+        # they're joined with '|'.  If that still fails (common on
+        # Windows due to shell escaping), fall back to running separate
+        # ffmpeg output args instead of tee.
+        twitch_url = f'{self.TWITCH_RTMP}/{self.twitch_key}' if self.twitch_key else None
+        youtube_url = f'{self.YOUTUBE_RTMP}/{self.youtube_key}' if self.youtube_key else None
 
-        if len(destinations) == 1:
-            cmd += ['-f', 'flv', destinations[0].split(']')[1]]
-        else:
-            cmd += ['-f', 'tee', '|'.join(destinations)]
+        urls = [u for u in [twitch_url, youtube_url] if u]
+
+        if len(urls) == 1:
+            cmd += ['-f', 'flv', urls[0]]
+        elif len(urls) == 2:
+            # Use two separate -f flv outputs instead of tee muxer —
+            # tee muxer has known issues with pipe chars on Windows.
+            cmd += ['-f', 'flv', urls[0], '-f', 'flv', urls[1]]
 
         return cmd
 

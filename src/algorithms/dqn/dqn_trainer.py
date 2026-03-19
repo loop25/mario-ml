@@ -161,11 +161,13 @@ class DQNTrainer(BaseTrainer):
         if num_envs > 1:
             # Pump pygame events between env creations so Windows
             # doesn't flag the window as "Not Responding" during setup.
-            try:
-                import pygame
-                _pump = pygame.event.pump
-            except (ImportError, Exception):
-                _pump = lambda: None
+            def _safe_pump():
+                try:
+                    import pygame
+                    if pygame.get_init() and pygame.display.get_init():
+                        pygame.event.pump()
+                except Exception:
+                    pass
             for i in range(num_envs - 1):
                 if self._env_factory:
                     extra_env = self._env_factory()
@@ -173,7 +175,7 @@ class DQNTrainer(BaseTrainer):
                     from src.environment.mario_env import create_cnn_env
                     extra_env = create_cnn_env(world=world, stage=stage)
                 self.extra_envs.append(extra_env)
-                _pump()  # Keep window responsive
+                _safe_pump()  # Keep window responsive
             print(f'  DQN: Created {num_envs} environments (round-robin, shared replay buffer)')
 
     def _preprocess_observation(self, obs: np.ndarray) -> np.ndarray:
