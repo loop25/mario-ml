@@ -219,7 +219,7 @@ DEFAULT_SETTINGS = {
     "music": True,
     "window_geometry": "",
     "extras_expanded": False,
-    "opponent_type": "random",
+    "opponent_type": "auto",
     "opponent_depth": "3",
     "opponent_model": "",
 }
@@ -267,7 +267,7 @@ class MarioLauncher:
         self.device_var = tk.StringVar(value="auto")
 
         # Opponent selection (for board games)
-        self.opponent_var = tk.StringVar(value="random")
+        self.opponent_var = tk.StringVar(value="auto")
         self.opponent_depth_var = tk.StringVar(value="3")
         self.opponent_model_var = tk.StringVar(value="")
 
@@ -366,7 +366,7 @@ class MarioLauncher:
         self.twitch_key_var.set(settings['twitch_key'])
         self.youtube_key_var.set(settings['youtube_key'])
         self.music_var.set(settings['music'])
-        self.opponent_var.set(settings.get('opponent_type', 'random'))
+        self.opponent_var.set(settings.get('opponent_type', 'auto'))
         self.opponent_depth_var.set(settings.get('opponent_depth', '3'))
         self.opponent_model_var.set(settings.get('opponent_model', ''))
 
@@ -537,6 +537,9 @@ class MarioLauncher:
 
         # Extras section (collapsible, spans both columns)
         self._build_extras_section(self.root)
+
+        # Schedule section (collapsible, spans both columns)
+        self._build_schedule_section(self.root)
 
     def _build_left_column(self, parent):
         """Left column: GAME selector + ALGORITHM picker + DURATION."""
@@ -742,30 +745,43 @@ class MarioLauncher:
         self.opponent_frame = tk.Frame(parent, bg=BG_DARK)
         # Initially hidden — shown only for board games via _update_opponent_visibility
         tk.Label(
-            self.opponent_frame, text="OPPONENT",
+            self.opponent_frame, text="OPPONENT  (board games only)",
             font=("Segoe UI", 8, "bold"), fg=TEXT_DIM, bg=BG_DARK,
         ).pack(anchor="w")
 
         opp_row = tk.Frame(self.opponent_frame, bg=BG_DARK)
         opp_row.pack(fill="x", pady=(4, 0))
 
-        tk.Label(opp_row, text="Type", font=("Segoe UI", 9),
+        tk.Label(opp_row, text="Mode", font=("Segoe UI", 9),
                  fg=TEXT_DIM, bg=BG_DARK).pack(side="left")
         self.opponent_combo = ttk.Combobox(
             opp_row, textvariable=self.opponent_var,
-            values=["random", "minimax", "model", "human"],
-            state="readonly", width=10,
+            values=["auto", "random", "minimax-easy", "minimax-medium",
+                    "minimax-hard", "model", "human", "human-vs-human"],
+            state="readonly", width=14,
         )
         self.opponent_combo.pack(side="left", padx=(5, 10))
+        self.opponent_combo.bind("<<ComboboxSelected>>",
+                                 lambda e: self._update_opponent_options())
 
-        tk.Label(opp_row, text="Depth", font=("Segoe UI", 9),
+        # Depth label+combo (only visible for minimax)
+        self.opp_depth_frame = tk.Frame(opp_row, bg=BG_DARK)
+        tk.Label(self.opp_depth_frame, text="Depth", font=("Segoe UI", 9),
                  fg=TEXT_DIM, bg=BG_DARK).pack(side="left")
         self.opponent_depth_spin = ttk.Combobox(
-            opp_row, textvariable=self.opponent_depth_var,
+            self.opp_depth_frame, textvariable=self.opponent_depth_var,
             values=["1", "2", "3", "4", "5"],
             state="readonly", width=4,
         )
         self.opponent_depth_spin.pack(side="left", padx=(5, 0))
+
+        # Description label
+        self.opp_desc_label = tk.Label(
+            self.opponent_frame,
+            text="Auto: random opponent for training (default)",
+            font=("Segoe UI", 8), fg=TEXT_DIM, bg=BG_DARK,
+        )
+        self.opp_desc_label.pack(anchor="w", pady=(2, 0))
 
         # ── Separator ──────────────────────────────────────────────────
         tk.Frame(parent, bg=BORDER_COLOR, height=1).pack(
@@ -976,6 +992,331 @@ class MarioLauncher:
         if save:
             self._schedule_save()
 
+    # ===================================================================
+    # Training Schedule
+    # ===================================================================
+
+    def _build_schedule_section(self, parent):
+        """Collapsible panel: training schedule and session queue."""
+        self._sched_expanded = False
+
+        toggle = tk.Frame(parent, bg=BG_MEDIUM, cursor="hand2")
+        toggle.pack(fill="x")
+
+        self.sched_arrow = tk.Label(
+            toggle,
+            text="▸  Training Schedule",
+            font=("Segoe UI", 10, "bold"),
+            fg=TEXT_DIM, bg=BG_MEDIUM,
+            padx=20, pady=6,
+        )
+        self.sched_arrow.pack(anchor="w")
+
+        for widget in [toggle, self.sched_arrow]:
+            widget.bind("<Button-1>", lambda e: self._toggle_schedule())
+
+        self.sched_content = tk.Frame(parent, bg=BG_DARK)
+        self._build_schedule_content(self.sched_content)
+
+    def _build_schedule_content(self, parent):
+        """Build the schedule panel contents."""
+        inner = tk.Frame(parent, bg=BG_DARK, padx=20, pady=8)
+        inner.pack(fill="x")
+
+        # ── Top row: presets + actions ────────────────────────────────
+        top_row = tk.Frame(inner, bg=BG_DARK)
+        top_row.pack(fill="x")
+
+        tk.Label(
+            top_row, text="QUICK SCHEDULES",
+            font=("Segoe UI", 8, "bold"), fg=TEXT_DIM, bg=BG_DARK,
+        ).pack(anchor="w")
+
+        presets_row = tk.Frame(top_row, bg=BG_DARK)
+        presets_row.pack(fill="x", pady=(4, 0))
+
+        preset_btn = dict(
+            font=("Segoe UI", 9), bg=BG_MEDIUM, fg=TEXT_PRIMARY,
+            activebackground=BG_LIGHT, activeforeground=TEXT_PRIMARY,
+            relief="flat", cursor="hand2", padx=10, pady=4,
+        )
+        tk.Button(
+            presets_row, text="Overnight All Games",
+            command=self._sched_overnight, **preset_btn,
+        ).pack(side="left", padx=(0, 5))
+        tk.Button(
+            presets_row, text="DT Generalist Run",
+            command=self._sched_dt_run, **preset_btn,
+        ).pack(side="left", padx=(0, 5))
+        tk.Button(
+            presets_row, text="Add Current Settings",
+            command=self._sched_add_current, **preset_btn,
+        ).pack(side="left", padx=(0, 5))
+        tk.Button(
+            presets_row, text="Clear All",
+            command=self._sched_clear,
+            font=("Segoe UI", 9), bg=BG_MEDIUM, fg=ACCENT_RED,
+            activebackground=BG_LIGHT, activeforeground=ACCENT_RED,
+            relief="flat", cursor="hand2", padx=10, pady=4,
+        ).pack(side="right")
+
+        # ── Separator ─────────────────────────────────────────────────
+        tk.Frame(inner, bg=BORDER_COLOR, height=1).pack(
+            fill="x", pady=(8, 6),
+        )
+
+        # ── Session queue (scrollable list) ───────────────────────────
+        tk.Label(
+            inner, text="SESSION QUEUE",
+            font=("Segoe UI", 8, "bold"), fg=TEXT_DIM, bg=BG_DARK,
+        ).pack(anchor="w")
+
+        # Header row
+        header_row = tk.Frame(inner, bg=BG_MEDIUM)
+        header_row.pack(fill="x", pady=(4, 0))
+        hdr_style = dict(font=("Segoe UI", 8, "bold"), fg=TEXT_DIM, bg=BG_MEDIUM, pady=3)
+        tk.Label(header_row, text="  #", width=3, anchor="w", **hdr_style).pack(side="left")
+        tk.Label(header_row, text="Game", width=12, anchor="w", **hdr_style).pack(side="left")
+        tk.Label(header_row, text="Algorithm", width=10, anchor="w", **hdr_style).pack(side="left")
+        tk.Label(header_row, text="Episodes", width=10, anchor="w", **hdr_style).pack(side="left")
+        tk.Label(header_row, text="Stream", width=6, anchor="w", **hdr_style).pack(side="left")
+        tk.Label(header_row, text="Status", width=10, anchor="w", **hdr_style).pack(side="left")
+
+        # Scrollable session list
+        list_frame = tk.Frame(inner, bg=BG_DARK)
+        list_frame.pack(fill="x", pady=(0, 4))
+
+        self.sched_canvas = tk.Canvas(
+            list_frame, bg=BG_DARK, highlightthickness=0, height=120,
+        )
+        self.sched_scrollbar = tk.Scrollbar(
+            list_frame, orient="vertical", command=self.sched_canvas.yview,
+        )
+        self.sched_list_frame = tk.Frame(self.sched_canvas, bg=BG_DARK)
+        self.sched_list_frame.bind(
+            "<Configure>",
+            lambda e: self.sched_canvas.configure(
+                scrollregion=self.sched_canvas.bbox("all")
+            ),
+        )
+        self.sched_canvas.create_window(
+            (0, 0), window=self.sched_list_frame, anchor="nw",
+        )
+        self.sched_canvas.configure(yscrollcommand=self.sched_scrollbar.set)
+        self.sched_canvas.pack(side="left", fill="x", expand=True)
+        self.sched_scrollbar.pack(side="right", fill="y")
+
+        # ── Bottom: Run Schedule button ───────────────────────────────
+        bottom_row = tk.Frame(inner, bg=BG_DARK)
+        bottom_row.pack(fill="x", pady=(4, 0))
+
+        self.sched_status = tk.Label(
+            bottom_row, text="No sessions scheduled",
+            font=("Segoe UI", 9), fg=TEXT_DIM, bg=BG_DARK,
+        )
+        self.sched_status.pack(side="left")
+
+        self.run_schedule_btn = tk.Button(
+            bottom_row,
+            text="▶  Run Schedule",
+            font=("Segoe UI", 10, "bold"),
+            bg=ACCENT_BLUE, fg=BG_DARK,
+            activebackground="#3d8ee6", activeforeground=BG_DARK,
+            relief="flat", cursor="hand2", padx=16, pady=4,
+            command=self._sched_run,
+        )
+        self.run_schedule_btn.pack(side="right")
+
+        # Initialize the calendar store and refresh the list
+        try:
+            from src.scheduler import CalendarStore
+            self._calendar_store = CalendarStore()
+        except Exception:
+            self._calendar_store = None
+        self._refresh_schedule_list()
+
+    def _toggle_schedule(self):
+        """Show/hide the schedule panel."""
+        if self._sched_expanded:
+            self.sched_content.pack_forget()
+            self.sched_arrow.configure(text="▸  Training Schedule")
+            self._sched_expanded = False
+        else:
+            self.sched_content.pack(fill="x", before=self._start_area_sep)
+            self.sched_arrow.configure(text="▾  Training Schedule")
+            self._sched_expanded = True
+
+    def _refresh_schedule_list(self):
+        """Refresh the session queue display from CalendarStore."""
+        # Clear existing rows
+        for widget in self.sched_list_frame.winfo_children():
+            widget.destroy()
+
+        if not self._calendar_store:
+            tk.Label(
+                self.sched_list_frame,
+                text="  Schedule system unavailable",
+                font=("Segoe UI", 9), fg=ACCENT_RED, bg=BG_DARK,
+            ).pack(anchor="w")
+            return
+
+        sessions = self._calendar_store.get_all_sessions()
+        if not sessions:
+            tk.Label(
+                self.sched_list_frame,
+                text="  No sessions — use presets or 'Add Current Settings' above",
+                font=("Segoe UI", 9, "italic"), fg=TEXT_DIM, bg=BG_DARK,
+            ).pack(anchor="w", pady=8)
+            self.sched_status.config(text="No sessions scheduled")
+            return
+
+        status_colors = {
+            'pending': TEXT_PRIMARY,
+            'running': ACCENT_GREEN,
+            'completed': TEXT_DIM,
+            'failed': ACCENT_RED,
+            'cancelled': TEXT_DIM,
+        }
+
+        for i, session in enumerate(sessions):
+            row_bg = BG_DARK if i % 2 == 0 else BG_MEDIUM
+            row = tk.Frame(self.sched_list_frame, bg=row_bg)
+            row.pack(fill="x")
+
+            row_style = dict(font=("Segoe UI", 9), bg=row_bg, pady=2)
+            tk.Label(row, text=f"  {i + 1}", width=3, anchor="w",
+                     fg=TEXT_DIM, **row_style).pack(side="left")
+            tk.Label(row, text=session.game_id, width=12, anchor="w",
+                     fg=TEXT_PRIMARY, **row_style).pack(side="left")
+            tk.Label(row, text=session.algorithm.upper(), width=10, anchor="w",
+                     fg=ALGO_INFO.get(session.algorithm, {}).get('color', TEXT_PRIMARY),
+                     **row_style).pack(side="left")
+            tk.Label(row, text=str(session.episodes), width=10, anchor="w",
+                     fg=TEXT_PRIMARY, **row_style).pack(side="left")
+            stream_text = "Yes" if session.stream else "—"
+            tk.Label(row, text=stream_text, width=6, anchor="w",
+                     fg=ACCENT_RED if session.stream else TEXT_DIM,
+                     **row_style).pack(side="left")
+            tk.Label(row, text=session.status.capitalize(), width=10, anchor="w",
+                     fg=status_colors.get(session.status, TEXT_DIM),
+                     **row_style).pack(side="left")
+
+            # Remove button
+            tk.Button(
+                row, text="✕", font=("Segoe UI", 8),
+                bg=row_bg, fg=ACCENT_RED,
+                activebackground=row_bg, activeforeground="#ff6b7a",
+                relief="flat", cursor="hand2", padx=4,
+                command=lambda sid=session.session_id: self._sched_remove(sid),
+            ).pack(side="right", padx=(0, 5))
+
+        pending = sum(1 for s in sessions if s.status == 'pending')
+        self.sched_status.config(
+            text=f"{pending} session{'s' if pending != 1 else ''} pending"
+        )
+
+    def _sched_add_current(self):
+        """Add a session matching current launcher settings to the queue."""
+        if not self._calendar_store:
+            return
+        try:
+            from src.scheduler.session import create_session
+            game_text = self.game_combo.get()
+            game_id = game_text.rsplit("(", 1)[-1].rstrip(")").strip() if "(" in game_text else "mario"
+            algo = self.selected_algo.get()
+            duration = self.duration_var.get().strip()
+            episodes = int(duration) if duration else 1000
+            stream = self.stream_var.get()
+            session = create_session(
+                game_id=game_id,
+                algorithm=algo,
+                episodes=episodes,
+                stream=stream,
+            )
+            self._calendar_store.add_session(session)
+            self._refresh_schedule_list()
+        except Exception as e:
+            self._set_status(f"Failed to add session: {e}", ACCENT_RED)
+
+    def _sched_overnight(self):
+        """Add overnight preset: all games with PPO."""
+        if not self._calendar_store:
+            return
+        try:
+            from src.scheduler.session import overnight_all_games
+            sessions = overnight_all_games(episodes_per_game=500)
+            self._calendar_store.add_preset(sessions)
+            self._refresh_schedule_list()
+        except Exception as e:
+            self._set_status(f"Failed to add overnight preset: {e}", ACCENT_RED)
+
+    def _sched_dt_run(self):
+        """Add DT generalist preset: collect from all games + train DT."""
+        if not self._calendar_store:
+            return
+        try:
+            from src.scheduler.session import dt_generalist_run
+            sessions = dt_generalist_run(episodes_per_game=100)
+            self._calendar_store.add_preset(sessions)
+            self._refresh_schedule_list()
+        except Exception as e:
+            self._set_status(f"Failed to add DT preset: {e}", ACCENT_RED)
+
+    def _sched_remove(self, session_id):
+        """Remove a session from the queue."""
+        if self._calendar_store:
+            self._calendar_store.remove_session(session_id)
+            self._refresh_schedule_list()
+
+    def _sched_clear(self):
+        """Clear all sessions from the queue."""
+        if not self._calendar_store:
+            return
+        for session in self._calendar_store.get_all_sessions():
+            self._calendar_store.remove_session(session.session_id)
+        self._refresh_schedule_list()
+
+    def _sched_run(self):
+        """Run the next pending session from the schedule."""
+        if not self._calendar_store:
+            return
+        next_session = self._calendar_store.get_next_session()
+        if not next_session:
+            # Also check for any pending sessions (get_next only returns
+            # sessions with a scheduled_start). Fall back to first pending.
+            pending = self._calendar_store.get_pending_sessions()
+            if pending:
+                next_session = pending[0]
+
+        if not next_session:
+            self._set_status("No pending sessions to run.", TEXT_DIM)
+            return
+
+        # Apply session settings to the launcher and start training
+        self.game_var.set(next_session.game_id)
+        # Find the game in the combo and select it
+        for i, game_info in enumerate(self.available_games):
+            if game_info['id'] == next_session.game_id:
+                self.game_combo.current(i)
+                self._on_game_changed()
+                break
+        self.selected_algo.set(next_session.algorithm)
+        self._select_algorithm(next_session.algorithm)
+        self.duration_var.set(str(next_session.episodes))
+        self.stream_var.set(next_session.stream)
+
+        # Mark as running in store
+        from datetime import datetime
+        self._calendar_store.update_session(
+            next_session.session_id,
+            status='running',
+            actual_start=datetime.now(),
+        )
+        self._refresh_schedule_list()
+
+        # Start training
+        self._start_training()
+
     def _build_start_area(self):
         """Always-visible START/STOP button and status bar at the bottom."""
         self._start_area_sep = tk.Frame(self.root, bg=BORDER_COLOR, height=1)
@@ -1181,6 +1522,27 @@ class MarioLauncher:
             self.opponent_frame.pack(fill="x", pady=(8, 0))
         else:
             self.opponent_frame.pack_forget()
+        self._update_opponent_options()
+
+    def _update_opponent_options(self):
+        """Show/hide depth selector and update description based on opponent mode."""
+        mode = self.opponent_var.get()
+        descriptions = {
+            'auto': 'Auto: random opponent for training (default)',
+            'random': 'Random: opponent picks random valid moves',
+            'minimax-easy': 'Minimax Easy: looks 1 move ahead',
+            'minimax-medium': 'Minimax Medium: looks 3 moves ahead',
+            'minimax-hard': 'Minimax Hard: strong play (depth 5)',
+            'model': 'Model: play against a trained AI checkpoint',
+            'human': 'Human: you play against the AI',
+            'human-vs-human': 'Human vs Human: two players, no AI',
+        }
+        self.opp_desc_label.config(text=descriptions.get(mode, ''))
+        # Only show depth for custom minimax (not presets)
+        if mode.startswith('minimax') and mode not in ('minimax-easy', 'minimax-medium', 'minimax-hard'):
+            self.opp_depth_frame.pack(side="left")
+        else:
+            self.opp_depth_frame.pack_forget()
 
     def _select_algorithm(self, algo):
         """Handle algorithm button click."""
@@ -1539,14 +1901,23 @@ class MarioLauncher:
 
         # Opponent config for board games
         opp_type = self.opponent_var.get()
-        if opp_type != "random":
-            cmd.extend(["--opponent", opp_type])
-            if opp_type == "minimax":
-                cmd.extend(["--opponent-depth", self.opponent_depth_var.get()])
-            elif opp_type == "model":
-                opp_model = self.opponent_model_var.get()
-                if opp_model:
-                    cmd.extend(["--opponent-model", opp_model])
+        if opp_type and opp_type != "auto":
+            # Map preset difficulties to minimax with fixed depths
+            opp_map = {
+                'minimax-easy': ('minimax', '1'),
+                'minimax-medium': ('minimax', '3'),
+                'minimax-hard': ('minimax', '5'),
+            }
+            if opp_type in opp_map:
+                opp_algo, opp_depth = opp_map[opp_type]
+                cmd.extend(["--opponent", opp_algo,
+                            "--opponent-depth", opp_depth])
+            else:
+                cmd.extend(["--opponent", opp_type])
+                if opp_type == "model":
+                    opp_model = self.opponent_model_var.get()
+                    if opp_model:
+                        cmd.extend(["--opponent-model", opp_model])
 
         game_opts = self._get_game_options()
         if game_opts:
