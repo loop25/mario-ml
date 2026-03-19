@@ -25,12 +25,16 @@ from gymnasium.spaces import Box, Discrete
 
 
 class TicTacToeEnv(gym.Env):
-    """Tic-Tac-Toe as a Gym environment with a random opponent."""
+    """Tic-Tac-Toe as a Gym environment with a pluggable opponent."""
 
     metadata = {'render.modes': ['rgb_array']}
 
-    def __init__(self, render_size: int = 84):
+    def __init__(self, render_size: int = 84, opponent=None):
         super().__init__()
+        if opponent is None:
+            from src.opponents import RandomOpponent
+            opponent = RandomOpponent()
+        self.opponent = opponent
         self.render_size = render_size
         self.action_space = Discrete(9)  # 3x3 positions
         self.observation_space = Box(
@@ -72,12 +76,21 @@ class TicTacToeEnv(gym.Env):
         if self._moves_played >= 9:
             return self._render_obs(), 0.0, True, self._info()
 
-        # Opponent move (random valid cell)
+        # Opponent move
         empty = list(zip(*np.where(self.board == 0)))
         if not empty:
+            valid_actions = [r * 3 + c for r, c in empty]
+            board_state = {
+                'board': self.board,
+                'valid_actions': valid_actions,
+                'game_id': 'tictactoe',
+                'turn': 2,
+            }
+            opp_action = self.opponent.pick_action(board_state)
+            opp_r, opp_c = divmod(opp_action, 3)
+        else:
             return self._render_obs(), 0.0, True, self._info()
 
-        opp_r, opp_c = random.choice(empty)
         self.board[opp_r, opp_c] = 2
         self._moves_played += 1
 

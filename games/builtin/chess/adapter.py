@@ -36,9 +36,9 @@ class ChessAdapter(BaseGameAdapter):
     def description(self) -> str:
         return 'Classic chess — checkmate your opponent to win.'
 
-    def create_env(self, **kwargs) -> gym.Env:
+    def create_env(self, opponent=None, **kwargs) -> gym.Env:
         from games.builtin.chess.game import ChessEnv
-        return ChessEnv(**kwargs)
+        return ChessEnv(opponent=opponent, **kwargs)
 
     def get_action_space_info(self) -> ActionSpaceInfo:
         from games.builtin.chess.game import NUM_SQUARES

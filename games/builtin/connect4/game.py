@@ -30,12 +30,16 @@ COLS = 7
 
 
 class ConnectFourEnv(gym.Env):
-    """Connect Four as a Gym environment with a random opponent."""
+    """Connect Four as a Gym environment with a pluggable opponent."""
 
     metadata = {'render.modes': ['rgb_array']}
 
-    def __init__(self, render_size: int = 84):
+    def __init__(self, render_size: int = 84, opponent=None):
         super().__init__()
+        if opponent is None:
+            from src.opponents import RandomOpponent
+            opponent = RandomOpponent()
+        self.opponent = opponent
         self.render_size = render_size
         self.action_space = Discrete(COLS)
         self.observation_space = Box(
@@ -75,12 +79,18 @@ class ConnectFourEnv(gym.Env):
         if self._pieces_played >= ROWS * COLS:
             return self._render_obs(), 0.0, True, self._info()
 
-        # Opponent move (random valid column)
+        # Opponent move
         valid_cols = [c for c in range(COLS) if self._is_valid_column(c)]
         if not valid_cols:
             return self._render_obs(), 0.0, True, self._info()
 
-        opp_col = random.choice(valid_cols)
+        board_state = {
+            'board': self.board,
+            'valid_actions': valid_cols,
+            'game_id': 'connect4',
+            'turn': 2,
+        }
+        opp_col = self.opponent.pick_action(board_state)
         self._drop_piece(opp_col, player=2)
         self._pieces_played += 1
 

@@ -38,17 +38,22 @@ ACTION_SPACE_SIZE = NUM_SQUARES * NUM_SQUARES  # 4096
 
 
 class ChessEnv(gym.Env):
-    """Chess as a Gym environment with a random opponent."""
+    """Chess as a Gym environment with a pluggable opponent."""
 
     metadata = {'render.modes': ['rgb_array']}
 
-    def __init__(self, render_size: int = 84, max_moves: int = 200):
+    def __init__(self, render_size: int = 84, max_moves: int = 200,
+                 opponent=None):
         super().__init__()
         if not HAS_CHESS:
             raise ImportError(
                 "python-chess is required for the Chess game. "
                 "Install it with: pip install python-chess"
             )
+        if opponent is None:
+            from src.opponents import RandomOpponent
+            opponent = RandomOpponent()
+        self.opponent = opponent
         self.render_size = render_size
         self.max_moves = max_moves
         self.action_space = Discrete(ACTION_SPACE_SIZE)
@@ -112,14 +117,21 @@ class ChessEnv(gym.Env):
         if self._moves_played >= self.max_moves:
             return self._render_obs(), 0.0, True, self._info()
 
-        # Opponent move (Black) — random legal move
+        # Opponent move (Black)
         opp_moves = list(self.board.legal_moves)
         if not opp_moves:
             # Shouldn't happen (terminal check above), but safety
             self._winner = 1
             return self._render_obs(), 1.0, True, self._info()
 
-        opp_move = random.choice(opp_moves)
+        board_state = {
+            'board': self.board,
+            'valid_actions': list(range(len(opp_moves))),
+            'game_id': 'chess',
+            'turn': 2,
+        }
+        opp_idx = self.opponent.pick_action(board_state)
+        opp_move = opp_moves[opp_idx]
 
         # Track captured piece before pushing
         opp_captured = self.board.piece_at(opp_move.to_square)

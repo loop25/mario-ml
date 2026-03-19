@@ -34,8 +34,8 @@ class CheckersAdapter(BaseGameAdapter):
     def description(self) -> str:
         return 'Classic checkers — capture all opponent pieces to win.'
 
-    def create_env(self, **kwargs) -> gym.Env:
-        return CheckersEnv(**kwargs)
+    def create_env(self, opponent=None, **kwargs) -> gym.Env:
+        return CheckersEnv(opponent=opponent, **kwargs)
 
     def get_action_space_info(self) -> ActionSpaceInfo:
         return ActionSpaceInfo(

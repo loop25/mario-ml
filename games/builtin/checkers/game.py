@@ -55,12 +55,16 @@ def _rc_to_pos(row: int, col: int) -> int:
 
 
 class CheckersEnv(gym.Env):
-    """Checkers as a Gym environment with a random opponent."""
+    """Checkers as a Gym environment with a pluggable opponent."""
 
     metadata = {'render.modes': ['rgb_array']}
 
-    def __init__(self, render_size: int = 84):
+    def __init__(self, render_size: int = 84, opponent=None):
         super().__init__()
+        if opponent is None:
+            from src.opponents import RandomOpponent
+            opponent = RandomOpponent()
+        self.opponent = opponent
         self.render_size = render_size
         self.action_space = Discrete(NUM_SQUARES * NUM_SQUARES)
         self.observation_space = Box(
@@ -131,7 +135,15 @@ class CheckersEnv(gym.Env):
             self._winner = 1
             return self._render_obs(), 1.0, True, self._info()
 
-        opp_from, opp_to = random.choice(opp_moves)
+        board_state = {
+            'board': self.board,
+            'valid_actions': [f * NUM_SQUARES + t for f, t in opp_moves],
+            'game_id': 'checkers',
+            'turn': 2,
+        }
+        opp_action = self.opponent.pick_action(board_state)
+        opp_from = opp_action // NUM_SQUARES
+        opp_to = opp_action % NUM_SQUARES
         self._last_from = opp_from
         self._last_to = opp_to
         self._execute_move(opp_from, opp_to)
