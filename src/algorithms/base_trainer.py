@@ -80,12 +80,14 @@ class BaseTrainer(ABC):
         visualizer: Optional[Dashboard] = None,
         save_dir: str = 'models',
         log_dir: str = 'logs',
+        event_bus=None,
     ):
         self.env = env
         self.config = config
         self.visualizer = visualizer
         self.save_dir = save_dir
         self.log_dir = log_dir
+        self.event_bus = event_bus
 
         # Training state
         self.episode_count = 0
@@ -264,6 +266,54 @@ class BaseTrainer(ABC):
                 cb(reward=reward, distance=distance, completed=completed)
             except Exception as e:
                 print(f'  Warning: episode callback error: {e}')
+
+    # ── Event Bus Publishing ──────────────────────────────────────
+
+    def publish_event(self, event: dict) -> None:
+        """Publish a training event to the event bus if available."""
+        if self.event_bus:
+            # Auto-inject game_id and episode count for context
+            event.setdefault('game_id', self.game_id)
+            event.setdefault('episode', self.episode_count)
+            self.event_bus.publish(event)
+
+    def publish_episode_complete(self, reward: float, info: dict = None) -> None:
+        """Publish an episode_complete event with standard fields."""
+        event = {
+            'type': 'episode_complete',
+            'reward': reward,
+            'episode': self.episode_count,
+            'game_id': self.game_id,
+            'best_reward': self.best_reward,
+            'elapsed': time.time() - self.start_time,
+        }
+        if info:
+            event['info'] = info
+        self.publish_event(event)
+
+    def publish_new_best(self, reward: float) -> None:
+        """Publish event when a new best reward is achieved."""
+        self.publish_event({
+            'type': 'new_best_reward',
+            'reward': reward,
+            'episode': self.episode_count,
+        })
+
+    def publish_training_start(self) -> None:
+        """Publish event when training begins."""
+        self.publish_event({
+            'type': 'training_start',
+            'algorithm': self.__class__.__name__,
+        })
+
+    def publish_training_end(self, total_episodes: int) -> None:
+        """Publish event when training ends."""
+        self.publish_event({
+            'type': 'training_end',
+            'total_episodes': total_episodes,
+            'best_reward': self.best_reward,
+            'elapsed': time.time() - self.start_time,
+        })
 
     @abstractmethod
     def train(self, num_episodes: int) -> None:
