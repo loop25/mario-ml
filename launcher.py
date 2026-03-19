@@ -969,6 +969,7 @@ class MarioLauncher:
             ("Compare Runs",           self._open_comparison),
             ("Add Game...",            self._add_game_wizard),
             ("Tournament",             self._open_tournament),
+            ("Agent Gallery",          self._open_agent_gallery),
         ]:
             tk.Button(
                 right_col, text=label,
@@ -1656,6 +1657,116 @@ class MarioLauncher:
                     bg=color,
                     activebackground=color,
                 )
+
+    def _open_agent_gallery(self):
+        """Open the Agent Gallery dialog showing personality profiles."""
+        dialog = tk.Toplevel(self.root)
+        dialog.title("Agent Gallery")
+        dialog.configure(bg=BG_DARK)
+        dialog.geometry("700x500")
+        dialog.transient(self.root)
+
+        tk.Label(
+            dialog, text="Agent Gallery",
+            font=("Segoe UI", 16, "bold"), fg=TEXT_PRIMARY, bg=BG_DARK,
+        ).pack(pady=(15, 5))
+        tk.Label(
+            dialog, text="Browse your trained agents and their personalities",
+            font=("Segoe UI", 9), fg=TEXT_DIM, bg=BG_DARK,
+        ).pack()
+
+        # Scrollable area
+        canvas = tk.Canvas(dialog, bg=BG_DARK, highlightthickness=0)
+        scrollbar = tk.Scrollbar(dialog, orient="vertical", command=canvas.yview)
+        scroll_frame = tk.Frame(canvas, bg=BG_DARK)
+        scroll_frame.bind(
+            "<Configure>",
+            lambda e: canvas.configure(scrollregion=canvas.bbox("all")),
+        )
+        canvas.create_window((0, 0), window=scroll_frame, anchor="nw")
+        canvas.configure(yscrollcommand=scrollbar.set)
+        canvas.pack(side="left", fill="both", expand=True, padx=20, pady=10)
+        scrollbar.pack(side="right", fill="y")
+
+        try:
+            from src.achievements.profile import scan_all_profiles
+            profiles = scan_all_profiles()
+        except Exception as e:
+            tk.Label(
+                scroll_frame, text=f"Error loading profiles: {e}",
+                fg=ACCENT_RED, bg=BG_DARK,
+            ).pack()
+            return
+
+        if not profiles:
+            tk.Label(
+                scroll_frame,
+                text="No trained agents found.\nTrain some agents first!",
+                font=("Segoe UI", 11), fg=TEXT_DIM, bg=BG_DARK,
+            ).pack(pady=20)
+            return
+
+        for profile in profiles:
+            card = tk.Frame(scroll_frame, bg=BG_MEDIUM, padx=12, pady=8)
+            card.pack(fill="x", pady=4)
+
+            # Header: name + style badge
+            header = tk.Frame(card, bg=BG_MEDIUM)
+            header.pack(fill="x")
+            algo_color = ALGO_INFO.get(
+                profile.algorithm, {},
+            ).get("color", TEXT_PRIMARY)
+            tk.Label(
+                header, text=profile.display_name,
+                font=("Segoe UI", 11, "bold"), fg=algo_color, bg=BG_MEDIUM,
+            ).pack(side="left")
+            tk.Label(
+                header, text=f"  [{profile.play_style}]",
+                font=("Segoe UI", 9, "italic"), fg=TEXT_DIM, bg=BG_MEDIUM,
+            ).pack(side="left")
+
+            # Stats row
+            stats = (
+                f"{profile.game_id} | {profile.algorithm.upper()} | "
+                f"{profile.total_episodes} eps | Best: {profile.best_reward:.1f}"
+            )
+            tk.Label(
+                card, text=stats,
+                font=("Segoe UI", 9), fg=TEXT_DIM, bg=BG_MEDIUM,
+            ).pack(anchor="w")
+
+            # Dimension bars
+            dims_frame = tk.Frame(card, bg=BG_MEDIUM)
+            dims_frame.pack(fill="x", pady=(4, 0))
+
+            for dim_name, dim_val in [
+                ("Consistency", profile.consistency),
+                ("Exploration", profile.exploration),
+                ("Speed", profile.speed),
+                ("Resilience", profile.resilience),
+                ("Peak", profile.peak_performance),
+            ]:
+                dim_row = tk.Frame(dims_frame, bg=BG_MEDIUM)
+                dim_row.pack(fill="x")
+                tk.Label(
+                    dim_row, text=f"{dim_name:>12}:",
+                    font=("Consolas", 8), fg=TEXT_DIM, bg=BG_MEDIUM,
+                    width=13, anchor="e",
+                ).pack(side="left")
+                filled = int(dim_val / 10)
+                bar = "\u2588" * filled + "\u2591" * (10 - filled)
+                tk.Label(
+                    dim_row, text=f" {bar} {dim_val}",
+                    font=("Consolas", 8), fg=algo_color, bg=BG_MEDIUM,
+                ).pack(side="left")
+
+            # Badges
+            if profile.badges:
+                badges_text = "  ".join(f"[{b}]" for b in profile.badges[:5])
+                tk.Label(
+                    card, text=badges_text,
+                    font=("Segoe UI", 8), fg=ACCENT_GREEN, bg=BG_MEDIUM,
+                ).pack(anchor="w", pady=(2, 0))
 
     def _open_tournament(self):
         """Open tournament setup dialog."""
