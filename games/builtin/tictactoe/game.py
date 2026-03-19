@@ -79,17 +79,17 @@ class TicTacToeEnv(gym.Env):
         # Opponent move
         empty = list(zip(*np.where(self.board == 0)))
         if not empty:
-            valid_actions = [r * 3 + c for r, c in empty]
-            board_state = {
-                'board': self.board,
-                'valid_actions': valid_actions,
-                'game_id': 'tictactoe',
-                'turn': 2,
-            }
-            opp_action = self.opponent.pick_action(board_state)
-            opp_r, opp_c = divmod(opp_action, 3)
-        else:
             return self._render_obs(), 0.0, True, self._info()
+
+        valid_actions = [r * 3 + c for r, c in empty]
+        board_state = {
+            'board': self.board,
+            'valid_actions': valid_actions,
+            'game_id': 'tictactoe',
+            'turn': 2,
+        }
+        opp_action = self.opponent.pick_action(board_state)
+        opp_r, opp_c = divmod(opp_action, 3)
 
         self.board[opp_r, opp_c] = 2
         self._moves_played += 1
