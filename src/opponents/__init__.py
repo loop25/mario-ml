@@ -9,6 +9,7 @@ can be paired with random, minimax, trained-model, or human opponents.
 
 from .base_opponent import BaseOpponent
 from .minimax_opponent import MinimaxOpponent
+from .model_opponent import ModelOpponent
 from .random_opponent import RandomOpponent
 
-__all__ = ["BaseOpponent", "MinimaxOpponent", "RandomOpponent"]
+__all__ = ["BaseOpponent", "MinimaxOpponent", "ModelOpponent", "RandomOpponent"]
