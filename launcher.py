@@ -219,6 +219,9 @@ DEFAULT_SETTINGS = {
     "music": True,
     "window_geometry": "",
     "extras_expanded": False,
+    "opponent_type": "random",
+    "opponent_depth": "3",
+    "opponent_model": "",
 }
 
 
@@ -263,6 +266,11 @@ class MarioLauncher:
 
         self.device_var = tk.StringVar(value="auto")
 
+        # Opponent selection (for board games)
+        self.opponent_var = tk.StringVar(value="random")
+        self.opponent_depth_var = tk.StringVar(value="3")
+        self.opponent_model_var = tk.StringVar(value="")
+
         # Streaming
         self.twitch_key_var = tk.StringVar()
         self.youtube_key_var = tk.StringVar()
@@ -293,6 +301,7 @@ class MarioLauncher:
 
         # Apply game-dependent UI visibility
         self._update_world_stage_visibility()
+        self._update_opponent_visibility()
 
         # Set initial window position/size
         self.root.update_idletasks()
@@ -357,6 +366,9 @@ class MarioLauncher:
         self.twitch_key_var.set(settings['twitch_key'])
         self.youtube_key_var.set(settings['youtube_key'])
         self.music_var.set(settings['music'])
+        self.opponent_var.set(settings.get('opponent_type', 'random'))
+        self.opponent_depth_var.set(settings.get('opponent_depth', '3'))
+        self.opponent_model_var.set(settings.get('opponent_model', ''))
 
         # Restore game selection
         game_idx = settings.get('game_index', 0)
@@ -406,6 +418,9 @@ class MarioLauncher:
             'twitch_key': self.twitch_key_var.get(),
             'youtube_key': self.youtube_key_var.get(),
             'music': self.music_var.get(),
+            'opponent_type': self.opponent_var.get(),
+            'opponent_depth': self.opponent_depth_var.get(),
+            'opponent_model': self.opponent_model_var.get(),
             'window_geometry': self.root.geometry(),
             'extras_expanded': self._extras_expanded,
         }
@@ -722,6 +737,35 @@ class MarioLauncher:
             parent, text="Whole Game  (curriculum learning)",
             variable=self.curriculum_var, **_cb,
         ).pack(anchor="w")
+
+        # ── Opponent (board games) ───────────────────────────────────
+        self.opponent_frame = tk.Frame(parent, bg=BG_DARK)
+        # Initially hidden — shown only for board games via _update_opponent_visibility
+        tk.Label(
+            self.opponent_frame, text="OPPONENT",
+            font=("Segoe UI", 8, "bold"), fg=TEXT_DIM, bg=BG_DARK,
+        ).pack(anchor="w")
+
+        opp_row = tk.Frame(self.opponent_frame, bg=BG_DARK)
+        opp_row.pack(fill="x", pady=(4, 0))
+
+        tk.Label(opp_row, text="Type", font=("Segoe UI", 9),
+                 fg=TEXT_DIM, bg=BG_DARK).pack(side="left")
+        self.opponent_combo = ttk.Combobox(
+            opp_row, textvariable=self.opponent_var,
+            values=["random", "minimax", "model", "human"],
+            state="readonly", width=10,
+        )
+        self.opponent_combo.pack(side="left", padx=(5, 10))
+
+        tk.Label(opp_row, text="Depth", font=("Segoe UI", 9),
+                 fg=TEXT_DIM, bg=BG_DARK).pack(side="left")
+        self.opponent_depth_spin = ttk.Combobox(
+            opp_row, textvariable=self.opponent_depth_var,
+            values=["1", "2", "3", "4", "5"],
+            state="readonly", width=4,
+        )
+        self.opponent_depth_spin.pack(side="left", padx=(5, 0))
 
         # ── Separator ──────────────────────────────────────────────────
         tk.Frame(parent, bg=BORDER_COLOR, height=1).pack(
@@ -1116,6 +1160,7 @@ class MarioLauncher:
         self._update_algo_desc()
         self._rebuild_game_options()
         self._update_world_stage_visibility()
+        self._update_opponent_visibility()
 
     def _update_world_stage_visibility(self):
         """Show world/stage selector only for games that have levels (Mario)."""
@@ -1126,6 +1171,16 @@ class MarioLauncher:
             self.ws_frame.pack(fill="x", pady=(8, 0))
         else:
             self.ws_frame.pack_forget()
+
+    def _update_opponent_visibility(self):
+        """Show opponent options only for board games."""
+        game_text = self.game_combo.get()
+        game_id = game_text.rsplit("(", 1)[-1].rstrip(")").strip() if "(" in game_text else "mario"
+        board_games = {'chess', 'checkers', 'connect4', 'tictactoe'}
+        if game_id in board_games:
+            self.opponent_frame.pack(fill="x", pady=(8, 0))
+        else:
+            self.opponent_frame.pack_forget()
 
     def _select_algorithm(self, algo):
         """Handle algorithm button click."""
@@ -1481,6 +1536,17 @@ class MarioLauncher:
         device = self.device_var.get()
         if device and device != 'auto':
             cmd.extend(["--device", device])
+
+        # Opponent config for board games
+        opp_type = self.opponent_var.get()
+        if opp_type != "random":
+            cmd.extend(["--opponent", opp_type])
+            if opp_type == "minimax":
+                cmd.extend(["--opponent-depth", self.opponent_depth_var.get()])
+            elif opp_type == "model":
+                opp_model = self.opponent_model_var.get()
+                if opp_model:
+                    cmd.extend(["--opponent-model", opp_model])
 
         game_opts = self._get_game_options()
         if game_opts:

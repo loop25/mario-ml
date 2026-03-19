@@ -54,6 +54,8 @@ if project_root not in sys.path:
     sys.path.insert(0, project_root)
 
 from games.registry import GameRegistry
+from src.achievements.event_bus import EventBus
+from src.achievements.achievement_manager import AchievementManager
 
 
 def parse_args():
@@ -214,6 +216,27 @@ Examples:
         choices=['auto', 'cuda', 'mps', 'cpu'],
         help='Compute device: auto (detect best), cuda, mps, or cpu. '
              'Default: auto (CUDA > MPS > CPU)',
+    )
+
+    # Opponent selection (for board games)
+    parser.add_argument(
+        '--opponent',
+        type=str,
+        default='random',
+        choices=['random', 'minimax', 'model', 'human'],
+        help='Opponent type for board games',
+    )
+    parser.add_argument(
+        '--opponent-depth',
+        type=int,
+        default=3,
+        help='Minimax search depth',
+    )
+    parser.add_argument(
+        '--opponent-model',
+        type=str,
+        default='',
+        help='Path to model checkpoint for model opponent',
     )
 
     return parser.parse_args()
@@ -610,6 +633,24 @@ def main():
         print(f'Environment: CNN mode (84x84x4 stacked frames)')
     else:
         from src.environment.universal_env import create_env_from_adapter
+        # Create opponent for board games
+        opponent = None
+        board_games = {'chess', 'checkers', 'connect4', 'tictactoe'}
+        if args.game in board_games:
+            if args.opponent == 'minimax':
+                from src.opponents import MinimaxOpponent
+                opponent = MinimaxOpponent(depth=args.opponent_depth, game_id=args.game)
+            elif args.opponent == 'model' and args.opponent_model:
+                from src.opponents import ModelOpponent
+                opponent = ModelOpponent(args.opponent_model)
+            elif args.opponent == 'human':
+                from src.opponents import HumanOpponent
+                opponent = HumanOpponent()
+            else:
+                from src.opponents import RandomOpponent
+                opponent = RandomOpponent()
+            game_kwargs['opponent'] = opponent
+            print(f'Opponent: {opponent.__class__.__name__}')
         env = create_env_from_adapter(game_adapter, **game_kwargs)
         print(f'Environment: {game_adapter.name} {env.observation_space.shape}')
 
@@ -811,6 +852,18 @@ def main():
 
     # Tag the trainer with the game so metadata.json records it.
     trainer.game_id = args.game
+
+    # Initialize event bus and achievement tracking
+    event_bus = EventBus()
+    achievement_mgr = AchievementManager(event_bus)
+    achievement_mgr.set_active_agent(f'{args.game}_{args.algorithm}')
+    trainer.event_bus = event_bus
+
+    # Record this session for trainer achievements
+    achievement_mgr.record_session(
+        args.game, args.algorithm,
+        streamed=bool(getattr(args, 'stream_twitch', None) or getattr(args, 'stream_youtube', None))
+    )
 
     # Pass dashboard config to trainer so callbacks know which
     # info-dict keys to extract and how many actions to track.
