@@ -183,7 +183,7 @@ class TestAllAdaptersConformToInterface:
         for adapter in registry.list_games():
             assert isinstance(adapter.name, str) and len(adapter.name) > 0
             assert isinstance(adapter.game_id, str) and len(adapter.game_id) > 0
-            assert adapter.category in ('platformer', 'puzzle', 'board', 'arcade', 'rpg')
+            assert adapter.category in ('platformer', 'puzzle', 'board', 'arcade', 'rpg', 'cooperative')
             assert isinstance(adapter.description, str)
 
     def test_all_adapters_have_action_space(self):
