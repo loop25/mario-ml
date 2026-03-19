@@ -757,7 +757,7 @@ class MarioLauncher:
         self.opponent_combo = ttk.Combobox(
             opp_row, textvariable=self.opponent_var,
             values=["auto", "random", "minimax-easy", "minimax-medium",
-                    "minimax-hard", "model", "human", "human-vs-human"],
+                    "minimax-hard", "auto-difficulty", "model", "human", "human-vs-human"],
             state="readonly", width=14,
         )
         self.opponent_combo.pack(side="left", padx=(5, 10))
@@ -1626,6 +1626,7 @@ class MarioLauncher:
             'minimax-easy': 'Minimax Easy: looks 1 move ahead',
             'minimax-medium': 'Minimax Medium: looks 3 moves ahead',
             'minimax-hard': 'Minimax Hard: strong play (depth 5)',
+            'auto-difficulty': 'Auto-Difficulty: starts easy, promotes as agent improves',
             'model': 'Model: play against a trained AI checkpoint',
             'human': 'Human: you play against the AI',
             'human-vs-human': 'Human vs Human: two players, no AI',

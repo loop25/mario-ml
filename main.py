@@ -223,7 +223,7 @@ Examples:
         '--opponent',
         type=str,
         default='random',
-        choices=['random', 'minimax', 'model', 'human'],
+        choices=['random', 'minimax', 'model', 'human', 'auto-difficulty'],
         help='Opponent type for board games',
     )
     parser.add_argument(
@@ -637,7 +637,12 @@ def main():
         opponent = None
         board_games = {'chess', 'checkers', 'connect4', 'tictactoe'}
         if args.game in board_games:
-            if args.opponent == 'minimax':
+            if args.opponent == 'auto-difficulty':
+                from src.opponents.difficulty_curriculum import DifficultyCurriculum
+                curriculum = DifficultyCurriculum(game_id=args.game)
+                opponent = curriculum.create_opponent()
+                game_kwargs['_difficulty_curriculum'] = curriculum
+            elif args.opponent == 'minimax':
                 from src.opponents import MinimaxOpponent
                 opponent = MinimaxOpponent(depth=args.opponent_depth, game_id=args.game)
             elif args.opponent == 'model' and args.opponent_model:
@@ -651,7 +656,9 @@ def main():
                 opponent = RandomOpponent()
             game_kwargs['opponent'] = opponent
             print(f'Opponent: {opponent.__class__.__name__}')
-        env = create_env_from_adapter(game_adapter, **game_kwargs)
+        env_kwargs = {k: v for k, v in game_kwargs.items()
+                      if not k.startswith('_')}
+        env = create_env_from_adapter(game_adapter, **env_kwargs)
         print(f'Environment: {game_adapter.name} {env.observation_space.shape}')
 
     print(f'Observation space: {env.observation_space.shape}')
@@ -858,6 +865,12 @@ def main():
     achievement_mgr = AchievementManager(event_bus)
     achievement_mgr.set_active_agent(f'{args.game}_{args.algorithm}')
     trainer.event_bus = event_bus
+
+    # Wire up difficulty curriculum to event bus (if active)
+    if '_difficulty_curriculum' in game_kwargs:
+        curriculum = game_kwargs['_difficulty_curriculum']
+        curriculum._bus = event_bus
+        event_bus.subscribe('episode_complete', curriculum._on_episode)
 
     # Record this session for trainer achievements
     achievement_mgr.record_session(
