@@ -11,6 +11,7 @@ from .session import (
     BUILT_IN_GAMES,
     BUILT_IN_ALGORITHMS,
 )
+from .calendar_store import CalendarStore
 
 __all__ = [
     "TrainingSession",
@@ -20,6 +21,7 @@ __all__ = [
     "dt_generalist_run",
     "session_to_dict",
     "session_from_dict",
+    "CalendarStore",
     "BUILT_IN_GAMES",
     "BUILT_IN_ALGORITHMS",
 ]
