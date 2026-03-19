@@ -1329,6 +1329,45 @@ class MarioLauncher:
         area = tk.Frame(self.root, bg=BG_DARK, padx=20, pady=10)
         area.pack(fill="x", side="bottom")
 
+        # NL Command input
+        cmd_frame = tk.Frame(area, bg=BG_DARK)
+        cmd_frame.pack(fill="x", pady=(0, 6))
+
+        tk.Label(cmd_frame, text="Quick Command:", font=("Segoe UI", 9),
+                 fg=TEXT_DIM, bg=BG_DARK).pack(side="left")
+        self.nl_command_var = tk.StringVar()
+        self.nl_command_entry = tk.Entry(
+            cmd_frame, textvariable=self.nl_command_var,
+            font=("Segoe UI", 10), bg=BG_MEDIUM, fg=TEXT_PRIMARY,
+            insertbackground=TEXT_PRIMARY, relief="flat",
+        )
+        self.nl_command_entry.pack(side="left", fill="x", expand=True, padx=(6, 6))
+        self.nl_command_entry.bind('<Return>', lambda e: self._apply_nl_command())
+
+        tk.Button(
+            cmd_frame, text="Apply",
+            font=("Segoe UI", 9), bg=ACCENT_BLUE, fg=BG_DARK,
+            activebackground="#3d8ee6", relief="flat", cursor="hand2", padx=10,
+            command=self._apply_nl_command,
+        ).pack(side="left")
+
+        # Placeholder text behaviour
+        self.nl_command_entry.insert(0, 'e.g., "Train snake with PPO" or "Play chess against hard AI"')
+        self.nl_command_entry.config(fg=TEXT_DIM)
+
+        def _on_nl_focus_in(event):
+            if self.nl_command_entry.get().startswith('e.g.,'):
+                self.nl_command_entry.delete(0, 'end')
+                self.nl_command_entry.config(fg=TEXT_PRIMARY)
+
+        def _on_nl_focus_out(event):
+            if not self.nl_command_entry.get():
+                self.nl_command_entry.insert(0, 'e.g., "Train snake with PPO" or "Play chess against hard AI"')
+                self.nl_command_entry.config(fg=TEXT_DIM)
+
+        self.nl_command_entry.bind('<FocusIn>', _on_nl_focus_in)
+        self.nl_command_entry.bind('<FocusOut>', _on_nl_focus_out)
+
         self.status_label = tk.Label(
             area,
             text="Ready — Pick a game and algorithm, then click START!",
@@ -1489,6 +1528,55 @@ class MarioLauncher:
             except (ValueError, tk.TclError):
                 pass
         return result
+
+    def _apply_nl_command(self):
+        """Parse natural language command and apply to launcher settings."""
+        text = self.nl_command_var.get().strip()
+        if not text or text.startswith('e.g.,'):
+            return
+
+        try:
+            from src.nl_commands.parser import parse_command
+            cmd = parse_command(text)
+        except Exception as e:
+            self._set_status(f"Parse error: {e}", ACCENT_RED)
+            return
+
+        if cmd.confidence < 0.1:
+            self._set_status(
+                "Couldn't understand that command. Try: 'train snake with ppo'",
+                TEXT_DIM,
+            )
+            return
+
+        # Apply parsed fields to launcher
+        if cmd.game_id:
+            for i, game_info in enumerate(self.available_games):
+                gid = getattr(game_info, 'game_id', None) or game_info.get('id', None)
+                if gid == cmd.game_id:
+                    self.game_combo.current(i)
+                    self._on_game_changed()
+                    break
+
+        if cmd.algorithm:
+            self.selected_algo.set(cmd.algorithm)
+            self._select_algorithm(cmd.algorithm)
+
+        if cmd.episodes:
+            self.duration_var.set(str(cmd.episodes))
+            self.preset_var.set("Custom")
+
+        if cmd.opponent:
+            self.opponent_var.set(cmd.opponent)
+
+        if cmd.eval_mode:
+            self.eval_var.set(True)
+
+        if cmd.stream:
+            self.stream_var.set(True)
+
+        self._set_status(f"Applied: {cmd.description}", ACCENT_GREEN)
+        self.nl_command_var.set("")
 
     def _on_game_changed(self, event=None):
         """Handle game selection change — update algorithm compatibility."""
