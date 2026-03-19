@@ -968,6 +968,7 @@ class MarioLauncher:
             ("Open Recordings Folder", lambda: self._open_folder(RECORDINGS_DIR)),
             ("Compare Runs",           self._open_comparison),
             ("Add Game...",            self._add_game_wizard),
+            ("Tournament",             self._open_tournament),
         ]:
             tk.Button(
                 right_col, text=label,
@@ -1655,6 +1656,246 @@ class MarioLauncher:
                     bg=color,
                     activebackground=color,
                 )
+
+    def _open_tournament(self):
+        """Open tournament setup dialog."""
+        dialog = tk.Toplevel(self.root)
+        dialog.title("Tournament Mode")
+        dialog.configure(bg=BG_DARK)
+        dialog.geometry("600x550")
+        dialog.resizable(True, True)
+        dialog.transient(self.root)
+
+        # Header
+        tk.Label(
+            dialog, text="Tournament Mode",
+            font=("Segoe UI", 16, "bold"), fg=TEXT_PRIMARY, bg=BG_DARK,
+        ).pack(pady=(15, 5))
+        tk.Label(
+            dialog, text="Pit agents against each other in board games",
+            font=("Segoe UI", 9), fg=TEXT_DIM, bg=BG_DARK,
+        ).pack()
+
+        # Settings frame
+        settings = tk.Frame(dialog, bg=BG_DARK, padx=20)
+        settings.pack(fill="x", pady=(10, 0))
+
+        # Game selector
+        game_row = tk.Frame(settings, bg=BG_DARK)
+        game_row.pack(fill="x", pady=4)
+        tk.Label(game_row, text="Game:", font=("Segoe UI", 10),
+                 fg=TEXT_PRIMARY, bg=BG_DARK, width=12, anchor="w").pack(side="left")
+        tourney_game = tk.StringVar(value="tictactoe")
+        ttk.Combobox(
+            game_row, textvariable=tourney_game,
+            values=["tictactoe", "connect4", "checkers", "chess"],
+            state="readonly", width=15,
+        ).pack(side="left")
+
+        # Games per match
+        gpm_row = tk.Frame(settings, bg=BG_DARK)
+        gpm_row.pack(fill="x", pady=4)
+        tk.Label(gpm_row, text="Games/Match:", font=("Segoe UI", 10),
+                 fg=TEXT_PRIMARY, bg=BG_DARK, width=12, anchor="w").pack(side="left")
+        gpm_var = tk.StringVar(value="10")
+        ttk.Combobox(
+            gpm_row, textvariable=gpm_var,
+            values=["2", "4", "6", "10", "20"],
+            state="readonly", width=6,
+        ).pack(side="left")
+
+        # Separator
+        tk.Frame(settings, bg=BORDER_COLOR, height=1).pack(fill="x", pady=8)
+
+        # Participants section
+        tk.Label(settings, text="PARTICIPANTS", font=("Segoe UI", 8, "bold"),
+                 fg=TEXT_DIM, bg=BG_DARK).pack(anchor="w")
+
+        # Participant list
+        participants_list = []
+
+        list_frame = tk.Frame(settings, bg=BG_MEDIUM, padx=5, pady=5)
+        list_frame.pack(fill="x", pady=4)
+
+        participants_display = tk.Frame(list_frame, bg=BG_MEDIUM)
+        participants_display.pack(fill="x")
+
+        def refresh_participants():
+            for w in participants_display.winfo_children():
+                w.destroy()
+            if not participants_list:
+                tk.Label(participants_display, text="  No participants added yet",
+                         font=("Segoe UI", 9, "italic"), fg=TEXT_DIM, bg=BG_MEDIUM).pack(anchor="w")
+            for i, p in enumerate(participants_list):
+                row = tk.Frame(participants_display, bg=BG_MEDIUM)
+                row.pack(fill="x")
+                tk.Label(row, text=f"  {i+1}. {p['name']} ({p['type']})",
+                         font=("Segoe UI", 9), fg=TEXT_PRIMARY, bg=BG_MEDIUM).pack(side="left")
+                tk.Button(row, text="\u2715", font=("Segoe UI", 8),
+                          bg=BG_MEDIUM, fg=ACCENT_RED, relief="flat", cursor="hand2",
+                          command=lambda idx=i: (participants_list.pop(idx), refresh_participants()),
+                          ).pack(side="right", padx=5)
+
+        # Add participant controls
+        add_row = tk.Frame(settings, bg=BG_DARK)
+        add_row.pack(fill="x", pady=4)
+
+        name_var = tk.StringVar(value="")
+        type_var = tk.StringVar(value="random")
+
+        tk.Label(add_row, text="Name:", font=("Segoe UI", 9),
+                 fg=TEXT_DIM, bg=BG_DARK).pack(side="left")
+        name_entry = tk.Entry(add_row, textvariable=name_var, width=12,
+                              font=("Segoe UI", 9), bg=BG_MEDIUM, fg=TEXT_PRIMARY,
+                              insertbackground=TEXT_PRIMARY, relief="flat")
+        name_entry.pack(side="left", padx=(3, 8))
+
+        tk.Label(add_row, text="Type:", font=("Segoe UI", 9),
+                 fg=TEXT_DIM, bg=BG_DARK).pack(side="left")
+        ttk.Combobox(
+            add_row, textvariable=type_var,
+            values=["random", "minimax-easy", "minimax-medium", "minimax-hard"],
+            state="readonly", width=14,
+        ).pack(side="left", padx=(3, 8))
+
+        def add_participant():
+            name = name_var.get().strip()
+            ptype = type_var.get()
+            if not name:
+                name = f"{ptype.replace('-', ' ').title()} {len(participants_list)+1}"
+            participants_list.append({'name': name, 'type': ptype})
+            name_var.set("")
+            refresh_participants()
+
+        tk.Button(add_row, text="+ Add", font=("Segoe UI", 9, "bold"),
+                  bg=ACCENT_GREEN, fg=BG_DARK, relief="flat", cursor="hand2",
+                  padx=8, command=add_participant).pack(side="left")
+
+        # Quick-add presets
+        preset_row = tk.Frame(settings, bg=BG_DARK)
+        preset_row.pack(fill="x", pady=2)
+        tk.Label(preset_row, text="Quick:", font=("Segoe UI", 8),
+                 fg=TEXT_DIM, bg=BG_DARK).pack(side="left")
+
+        def quick_add_3():
+            participants_list.clear()
+            participants_list.extend([
+                {'name': 'Random Bot', 'type': 'random'},
+                {'name': 'Minimax Easy', 'type': 'minimax-easy'},
+                {'name': 'Minimax Hard', 'type': 'minimax-hard'},
+            ])
+            refresh_participants()
+
+        def quick_add_4():
+            participants_list.clear()
+            participants_list.extend([
+                {'name': 'Random Bot', 'type': 'random'},
+                {'name': 'Minimax Easy', 'type': 'minimax-easy'},
+                {'name': 'Minimax Medium', 'type': 'minimax-medium'},
+                {'name': 'Minimax Hard', 'type': 'minimax-hard'},
+            ])
+            refresh_participants()
+
+        qbtn = dict(font=("Segoe UI", 8), bg=BG_MEDIUM, fg=TEXT_DIM,
+                    relief="flat", cursor="hand2", padx=6)
+        tk.Button(preset_row, text="3 Bots", command=quick_add_3, **qbtn).pack(side="left", padx=3)
+        tk.Button(preset_row, text="4 Bots", command=quick_add_4, **qbtn).pack(side="left", padx=3)
+
+        refresh_participants()
+
+        # Separator
+        tk.Frame(settings, bg=BORDER_COLOR, height=1).pack(fill="x", pady=8)
+
+        # Results area
+        results_frame = tk.Frame(settings, bg=BG_DARK)
+        results_frame.pack(fill="both", expand=True)
+
+        results_text = tk.Text(
+            results_frame, height=8, font=("Consolas", 9),
+            bg=BG_MEDIUM, fg=TEXT_PRIMARY, insertbackground=TEXT_PRIMARY,
+            relief="flat", state="disabled",
+        )
+        results_text.pack(fill="both", expand=True, pady=4)
+
+        # Start button
+        def run_tournament():
+            if len(participants_list) < 2:
+                results_text.config(state="normal")
+                results_text.delete("1.0", "end")
+                results_text.insert("end", "Need at least 2 participants!")
+                results_text.config(state="disabled")
+                return
+
+            # Map types to TournamentParticipant format
+            type_map = {
+                'random': ('random', {}),
+                'minimax-easy': ('minimax', {'depth': 1}),
+                'minimax-medium': ('minimax', {'depth': 3}),
+                'minimax-hard': ('minimax', {'depth': 5}),
+            }
+
+            try:
+                from src.tournament import TournamentEngine, TournamentParticipant
+                parts = []
+                for p in participants_list:
+                    ptype, pconfig = type_map.get(p['type'], ('random', {}))
+                    parts.append(TournamentParticipant(
+                        name=p['name'],
+                        participant_type=ptype,
+                        config=pconfig,
+                    ))
+
+                engine = TournamentEngine(
+                    game_id=tourney_game.get(),
+                    participants=parts,
+                    games_per_match=int(gpm_var.get()),
+                    format='round_robin',
+                )
+
+                results_text.config(state="normal")
+                results_text.delete("1.0", "end")
+                results_text.insert("end", "Running tournament...\n\n")
+                results_text.config(state="disabled")
+                dialog.update()
+
+                def on_progress(match_num, total, result):
+                    results_text.config(state="normal")
+                    results_text.insert("end",
+                        f"  Match {match_num}/{total}: {result.player1} vs {result.player2} — "
+                        f"{result.wins_p1}-{result.wins_p2} (draws: {result.draws})\n")
+                    results_text.config(state="disabled")
+                    dialog.update()
+
+                result = engine.run_tournament(progress_callback=on_progress)
+
+                # Show standings
+                results_text.config(state="normal")
+                results_text.insert("end", "\n" + "=" * 50 + "\n")
+                results_text.insert("end", f"  STANDINGS — {tourney_game.get().upper()}\n")
+                results_text.insert("end", "=" * 50 + "\n\n")
+                results_text.insert("end", f"  {'Name':<20} {'W':>3} {'L':>3} {'D':>3} {'Pts':>5}\n")
+                results_text.insert("end", "  " + "-" * 36 + "\n")
+                for s in result.standings:
+                    results_text.insert("end",
+                        f"  {s['name']:<20} {s['wins']:>3} {s['losses']:>3} {s['draws']:>3} {s['points']:>5.0f}\n")
+                results_text.insert("end", f"\n  Champion: {result.champion}\n")
+                results_text.config(state="disabled")
+                results_text.see("end")
+
+            except Exception as e:
+                results_text.config(state="normal")
+                results_text.delete("1.0", "end")
+                results_text.insert("end", f"Tournament error: {e}")
+                results_text.config(state="disabled")
+
+        tk.Button(
+            settings, text="Start Tournament",
+            font=("Segoe UI", 11, "bold"),
+            bg=ACCENT_BLUE, fg=BG_DARK,
+            activebackground="#3d8ee6", activeforeground=BG_DARK,
+            relief="flat", cursor="hand2", pady=8,
+            command=run_tournament,
+        ).pack(fill="x", pady=(4, 10))
 
     def _open_comparison(self):
         """Open the cross-game training comparison panel."""
