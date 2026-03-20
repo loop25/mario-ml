@@ -878,6 +878,18 @@ def main():
         streamed=bool(getattr(args, 'stream_twitch', None) or getattr(args, 'stream_youtube', None))
     )
 
+    # Initialize milestone recorder for training replay markers
+    milestone_recorder = None
+    if recorder:  # Only if video recording is enabled
+        try:
+            from src.recording.milestone_recorder import MilestoneRecorder
+            milestone_recorder = MilestoneRecorder(event_bus=event_bus,
+                                                    output_dir='recordings')
+            milestone_recorder.start_recording()
+            print('  Milestone recorder enabled — markers will be saved with recording')
+        except Exception as e:
+            print(f'  Note: Milestone recording disabled ({e})')
+
     # Pass dashboard config to trainer so callbacks know which
     # info-dict keys to extract and how many actions to track.
     trainer.dashboard_config = game_adapter.get_dashboard_config()
@@ -1121,12 +1133,42 @@ def main():
                                 _create_cnn(world=current_world, stage=current_stage)
                             )
 
+        # Generate agent personality profile after training
+        if not args.eval:
+            try:
+                from src.achievements.profile import generate_profile
+                meta_path = os.path.join(trainer.save_dir, args.algorithm, 'metadata.json')
+                if os.path.isfile(meta_path):
+                    profile = generate_profile(meta_path)
+                    profile_path = os.path.join(trainer.save_dir, args.algorithm, 'profile.json')
+                    with open(profile_path, 'w') as f:
+                        json.dump({
+                            'agent_id': profile.agent_id,
+                            'game_id': profile.game_id,
+                            'algorithm': profile.algorithm,
+                            'play_style': profile.play_style,
+                            'consistency': profile.consistency,
+                            'exploration': profile.exploration,
+                            'speed': profile.speed,
+                            'resilience': profile.resilience,
+                            'peak_performance': profile.peak_performance,
+                            'total_episodes': profile.total_episodes,
+                            'best_reward': profile.best_reward,
+                        }, f, indent=2)
+                    print(f'  Agent profile saved: {profile.play_style} ({profile_path})')
+            except Exception as e:
+                print(f'  Note: Profile generation skipped ({e})')
+
     except KeyboardInterrupt:
         print('\n\nTraining interrupted by user.')
     except SystemExit:
         pass
     finally:
         # Cleanup
+        if milestone_recorder:
+            # Use the recorder's output filename for the markers sidecar
+            recording_file = getattr(recorder, 'output_path', None) or getattr(recorder, '_output_path', None)
+            milestone_recorder.stop_recording(recording_file)
         if stream_manager:
             stream_manager.stop()
         if recorder:

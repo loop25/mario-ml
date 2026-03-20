@@ -554,6 +554,10 @@ class DQNTrainer(BaseTrainer):
                 next_obs, reward, done, info = env.step(action)
                 next_obs_processed = self._preprocess_observation(next_obs)
 
+                # Record for DT trajectory collection (env 0 only)
+                if env_idx == 0:
+                    self._dt_record_step(next_obs, action, reward)
+
                 # Store in shared replay buffer
                 self.replay_buffer.push(
                     state=obs,
@@ -594,6 +598,10 @@ class DQNTrainer(BaseTrainer):
                     self.episode_count = episodes_completed
                     ep_reward = env_rewards[env_idx]
                     ep_dist = env_distances[env_idx]
+
+                    # Finalize DT trajectory (env 0 only)
+                    if env_idx == 0:
+                        self._dt_finalize_episode()
 
                     # Decay epsilon
                     self.epsilon = max(

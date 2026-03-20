@@ -288,6 +288,17 @@ class NEATTrainer(BaseTrainer):
             len(best_gen_genome.nodes) + len(best_gen_genome.connections)
         )
 
+        # Render NEAT network topology for the best genome
+        try:
+            from src.visualization.neat_visualizer import NeatVisualizer
+            if not hasattr(self, '_neat_viz'):
+                self._neat_viz = NeatVisualizer(width=300, height=250)
+            viz_img = self._neat_viz.render_genome(best_gen_genome, self.neat_config)
+            # Store for dashboard to pick up
+            self._latest_network_viz = viz_img
+        except Exception:
+            pass
+
         # Print generation summary
         completion_str = f', Completions={gen_completions}' if gen_completions > 0 else ''
         print(f'  Gen {self.generation}: '
@@ -424,6 +435,17 @@ class NEATTrainer(BaseTrainer):
         complexity = (
             len(best_gen_genome.nodes) + len(best_gen_genome.connections)
         )
+
+        # Render NEAT network topology for the best genome
+        try:
+            from src.visualization.neat_visualizer import NeatVisualizer
+            if not hasattr(self, '_neat_viz'):
+                self._neat_viz = NeatVisualizer(width=300, height=250)
+            viz_img = self._neat_viz.render_genome(best_gen_genome, self.neat_config)
+            # Store for dashboard to pick up
+            self._latest_network_viz = viz_img
+        except Exception:
+            pass
 
         completion_str = f', Completions={gen_completions}' if gen_completions > 0 else ''
         print(f'  Gen {self.generation}: '
