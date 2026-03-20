@@ -488,6 +488,9 @@ class RainbowTrainer(BaseTrainer):
         print(f'Learning starts: {self.learning_starts:,} steps')
         print(f'{"="*60}\n')
 
+        # Publish training start event (achievements, milestones, etc.)
+        self.publish_training_start()
+
         for episode in range(1, num_episodes + 1):
             if self._dashboard_closed:
                 break
@@ -628,6 +631,7 @@ class RainbowTrainer(BaseTrainer):
             # Update best tracking
             if episode_reward > self.best_reward:
                 self.best_reward = episode_reward
+                self.publish_new_best(episode_reward)
             if game_metric > self.best_distance:
                 self.best_distance = game_metric
 
@@ -647,6 +651,12 @@ class RainbowTrainer(BaseTrainer):
                 game_metric = (
                     self._win_tracker['wins'] / self._win_tracker['total']
                 )
+
+            # Publish event bus episode_complete (achievements, milestones, etc.)
+            self.publish_episode_complete(episode_reward, {
+                'distance': game_metric,
+                'stage_completed': completed,
+            })
 
             # Fire episode callbacks
             self._fire_episode_complete(
@@ -698,6 +708,10 @@ class RainbowTrainer(BaseTrainer):
 
         # Training complete
         self.is_training = False
+
+        # Publish training end event (achievements, milestones, etc.)
+        self.publish_training_end(self.episode_count)
+
         print(f'\n{"="*60}')
         print(f'Rainbow DQN Training Complete!')
         print(f'Episodes: {self.episode_count}')

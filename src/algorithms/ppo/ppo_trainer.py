@@ -240,8 +240,15 @@ class DashboardCallback(BaseCallback):
         self.trainer.episode_count = self.episode_count
         if reward > self.trainer.best_reward:
             self.trainer.best_reward = reward
+            self.trainer.publish_new_best(reward)
         if game_metric > self.trainer.best_distance:
             self.trainer.best_distance = game_metric
+
+        # Publish event bus episode_complete (achievements, milestones, etc.)
+        self.trainer.publish_episode_complete(reward, {
+            'game_metric': game_metric,
+            'stage_completed': self._env_stage_completed[env_index],
+        })
 
         # Finalize DT trajectory when env 0 completes an episode
         if env_index == 0:
@@ -501,6 +508,9 @@ class PPOTrainer(BaseTrainer):
         print(f'Learning rate: {self.config.get("learning_rate", 2.5e-4)}')
         print(f'{"="*60}\n')
 
+        # Publish training start event (achievements, milestones, etc.)
+        self.publish_training_start()
+
         # Create callback for dashboard updates
         callback = DashboardCallback(
             dashboard=self.visualizer,
@@ -518,6 +528,10 @@ class PPOTrainer(BaseTrainer):
             print('\nTraining interrupted.')
 
         self.is_training = False
+
+        # Publish training end event (achievements, milestones, etc.)
+        self.publish_training_end(self.episode_count)
+
         print(f'\n{"="*60}')
         print(f'PPO Training Complete!')
         print(f'Episodes: {self.episode_count}')

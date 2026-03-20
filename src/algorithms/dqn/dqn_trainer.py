@@ -324,6 +324,9 @@ class DQNTrainer(BaseTrainer):
         print(f'Learning starts after: {self.learning_starts:,} steps')
         print(f'{"="*60}\n')
 
+        # Publish training start event (achievements, milestones, etc.)
+        self.publish_training_start()
+
         for episode in range(1, num_episodes + 1):
             # Stop if dashboard was closed
             if self._dashboard_closed:
@@ -409,8 +412,15 @@ class DQNTrainer(BaseTrainer):
             # Update best tracking
             if episode_reward > self.best_reward:
                 self.best_reward = episode_reward
+                self.publish_new_best(episode_reward)
             if max_distance > self.best_distance:
                 self.best_distance = max_distance
+
+            # Publish event bus episode_complete (achievements, milestones, etc.)
+            self.publish_episode_complete(episode_reward, {
+                'distance': max_distance,
+                'stage_completed': info.get('stage_completed', False),
+            })
 
             # Notify episode callbacks (curriculum learning, etc.)
             stage_completed = info.get('stage_completed', False)
@@ -462,6 +472,10 @@ class DQNTrainer(BaseTrainer):
 
         # Training complete
         self.is_training = False
+
+        # Publish training end event (achievements, milestones, etc.)
+        self.publish_training_end(self.episode_count)
+
         print(f'\n{"="*60}')
         print(f'DQN Training Complete!')
         print(f'Episodes: {self.episode_count}')
@@ -494,6 +508,9 @@ class DQNTrainer(BaseTrainer):
         print(f'Buffer size: {self.config.get("buffer_size", 100000):,}')
         print(f'Learning starts after: {self.learning_starts:,} steps')
         print(f'{"="*60}\n')
+
+        # Publish training start event (achievements, milestones, etc.)
+        self.publish_training_start()
 
         # Per-env state tracking
         env_obs = [None] * n
@@ -587,8 +604,15 @@ class DQNTrainer(BaseTrainer):
                     # Track best
                     if ep_reward > self.best_reward:
                         self.best_reward = ep_reward
+                        self.publish_new_best(ep_reward)
                     if ep_dist > self.best_distance:
                         self.best_distance = ep_dist
+
+                    # Publish event bus episode_complete (achievements, milestones, etc.)
+                    self.publish_episode_complete(ep_reward, {
+                        'distance': ep_dist,
+                        'stage_completed': info.get('stage_completed', False),
+                    })
 
                     # Stage completion
                     if info.get('stage_completed', False):
@@ -646,6 +670,10 @@ class DQNTrainer(BaseTrainer):
                 pass
 
         self.is_training = False
+
+        # Publish training end event (achievements, milestones, etc.)
+        self.publish_training_end(self.episode_count)
+
         print(f'\n{"="*60}')
         print(f'DQN Training Complete!')
         print(f'Episodes: {self.episode_count}')

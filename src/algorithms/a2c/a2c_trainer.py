@@ -82,6 +82,7 @@ class A2CDashboardCallback(BaseCallback):
 
                     if reward > self.trainer.best_reward:
                         self.trainer.best_reward = reward
+                        self.trainer.publish_new_best(reward)
 
                     # Extract game-specific metric for curriculum callback
                     game_metric = infos[i].get(info_key, 0)
@@ -102,6 +103,12 @@ class A2CDashboardCallback(BaseCallback):
                         game_metric = (
                             self._win_tracker['wins'] / self._win_tracker['total']
                         )
+
+                    # Publish event bus episode_complete (achievements, milestones, etc.)
+                    self.trainer.publish_episode_complete(reward, {
+                        'game_metric': game_metric,
+                        'stage_completed': completed,
+                    })
 
                     self.trainer._fire_episode_complete(
                         reward=reward, distance=game_metric, completed=completed,
@@ -229,10 +236,17 @@ class A2CTrainer(BaseTrainer):
         else:
             self.model.set_env(vec_env)
 
+        # Publish training start event (achievements, milestones, etc.)
+        self.publish_training_start()
+
         callback = A2CDashboardCallback(self.visualizer, self)
         self.model.learn(total_timesteps=total_timesteps, callback=callback)
 
         self.is_training = False
+
+        # Publish training end event (achievements, milestones, etc.)
+        self.publish_training_end(self.episode_count)
+
         self._save_on_exit()
 
     def evaluate(self, num_episodes: int = 5) -> float:
