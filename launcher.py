@@ -1800,6 +1800,22 @@ class MarioLauncher:
         )
         self.start_btn.pack(fill="x")
 
+        # Restart Training button — deletes checkpoint and starts fresh
+        self.restart_btn = tk.Button(
+            area,
+            text="\u21BB   RESTART TRAINING (Fresh Start)",
+            font=("Segoe UI", 10, "bold"),
+            bg="#c87000",
+            fg="#ffffff",
+            activebackground="#e08800",
+            activeforeground="#ffffff",
+            relief="flat",
+            cursor="hand2",
+            pady=6,
+            command=self._restart_training,
+        )
+        self.restart_btn.pack(fill="x", pady=(4, 0))
+
     # ===================================================================
     # Helper Methods
     # ===================================================================
@@ -2718,6 +2734,56 @@ class MarioLauncher:
             self._stop_training()
         else:
             self._start_training()
+
+    def _restart_training(self):
+        """Delete existing checkpoint and start training from scratch."""
+        from tkinter import messagebox
+
+        algo = self.selected_algo.get()
+        game_text = self.game_combo.get()
+        game_id = game_text.rsplit("(", 1)[-1].rstrip(")").strip() if "(" in game_text else "mario"
+
+        model_dir = os.path.join('models', algo)
+
+        # Check if any checkpoint files exist
+        checkpoint_files = []
+        for pattern in ['final.zip', 'final.pt', 'final_best_genome.pkl', 'metadata.json']:
+            path = os.path.join(model_dir, pattern)
+            if os.path.isfile(path):
+                checkpoint_files.append(path)
+
+        if not checkpoint_files:
+            messagebox.showinfo(
+                "No Existing Model",
+                f"No existing {algo.upper()} model found.\n"
+                "Training will start fresh."
+            )
+            self._start_training()
+            return
+
+        # Confirm deletion
+        result = messagebox.askyesno(
+            "Restart Training?",
+            f"This will DELETE the existing {algo.upper()} model for {game_id}:\n\n"
+            + "\n".join(f"  \u2022 {os.path.basename(f)}" for f in checkpoint_files)
+            + "\n\nTraining will start completely from scratch.\n"
+            "This cannot be undone. Continue?",
+            icon='warning'
+        )
+
+        if not result:
+            self._set_status("Restart cancelled.", TEXT_DIM)
+            return
+
+        # Delete checkpoint files
+        for f in checkpoint_files:
+            try:
+                os.remove(f)
+            except OSError as e:
+                print(f"  Warning: Could not delete {f}: {e}")
+
+        self._set_status(f"Old {algo.upper()} model deleted. Starting fresh...", ACCENT_GREEN)
+        self._start_training()
 
     def _start_training(self):
         """Build the CLI command and launch main.py as a subprocess."""
