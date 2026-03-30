@@ -95,13 +95,28 @@ class ChessEnv(gym.Env):
             self._winner = 2
             return self._render_obs(), -1.0, True, self._info()
 
-        # Track captured piece before pushing
+        # Piece value table for intermediate capture rewards.
+        # Gives the agent signal before checkmate (the sparse terminal reward).
+        _PIECE_VALUES = {
+            chess.PAWN: 0.01, chess.KNIGHT: 0.03, chess.BISHOP: 0.03,
+            chess.ROOK: 0.05, chess.QUEEN: 0.09,
+        }
+
+        # Track captured piece and compute capture reward
+        step_reward = 0.0
         captured = self.board.piece_at(move.to_square)
         if captured is not None:
             if captured.color == chess.WHITE:
                 self._captured_white.append(captured.piece_type)
             else:
                 self._captured_black.append(captured.piece_type)
+                step_reward += _PIECE_VALUES.get(captured.piece_type, 0.0)
+
+        # Small reward for giving check (aggressive play)
+        self.board.push(move)
+        if self.board.is_check():
+            step_reward += 0.02
+        self.board.pop()
 
         # Execute agent move (White)
         self._last_move = move
@@ -120,7 +135,6 @@ class ChessEnv(gym.Env):
         # Opponent move (Black)
         opp_moves = list(self.board.legal_moves)
         if not opp_moves:
-            # Shouldn't happen (terminal check above), but safety
             self._winner = 1
             return self._render_obs(), 1.0, True, self._info()
 
@@ -133,11 +147,12 @@ class ChessEnv(gym.Env):
         opp_idx = self.opponent.pick_action(board_state)
         opp_move = opp_moves[opp_idx]
 
-        # Track captured piece before pushing
+        # Track opponent capture — penalize agent for losing pieces
         opp_captured = self.board.piece_at(opp_move.to_square)
         if opp_captured is not None:
             if opp_captured.color == chess.WHITE:
                 self._captured_white.append(opp_captured.piece_type)
+                step_reward -= _PIECE_VALUES.get(opp_captured.piece_type, 0.0)
             else:
                 self._captured_black.append(opp_captured.piece_type)
 
@@ -148,12 +163,12 @@ class ChessEnv(gym.Env):
         # Check terminal after opponent move
         done, reward = self._check_terminal()
         if done:
-            return self._render_obs(), reward, True, self._info()
+            return self._render_obs(), reward + step_reward, True, self._info()
 
         if self._moves_played >= self.max_moves:
-            return self._render_obs(), 0.0, True, self._info()
+            return self._render_obs(), step_reward, True, self._info()
 
-        return self._render_obs(), 0.0, False, self._info()
+        return self._render_obs(), step_reward, False, self._info()
 
     def _check_terminal(self):
         """Check if the game is over. Returns (done, reward_for_agent)."""

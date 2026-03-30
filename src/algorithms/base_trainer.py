@@ -119,6 +119,14 @@ class BaseTrainer(ABC):
         # Checkpoint settings (can be overridden in config)
         self.checkpoint_interval = config.get('save_freq', 50)
 
+        # ── Mastery Detection (auto-stop when fully trained) ─────────
+        # Set via set_completion_criteria(). When the rolling metric average
+        # exceeds the threshold over `window` episodes, training auto-stops
+        # and the model is saved.
+        self._completion_criteria = None
+        self._completion_metric_history = []
+        self.mastered = False  # True when completion criteria met
+
         # ── DT Trajectory Collection ────────────────────────────────
         # When set, episode data is automatically saved to the experience
         # store for later Decision Transformer training.
@@ -314,6 +322,87 @@ class BaseTrainer(ABC):
             'best_reward': self.best_reward,
             'elapsed': time.time() - self.start_time,
         })
+
+    # ── Mastery Detection ──────────────────────────────────────────
+
+    def set_completion_criteria(self, criteria: dict) -> None:
+        """Configure auto-stop when the agent masters the game.
+
+        Args:
+            criteria: Dict with keys:
+                metric (str): Info-dict key to track (e.g. 'score', 'win_rate')
+                threshold (float): Average must exceed this to be "mastered"
+                window (int): Number of episodes for the rolling average
+                description (str): Human-readable description
+        """
+        self._completion_criteria = criteria
+        self._completion_metric_history = []
+        self.mastered = False
+
+    def check_mastery(self, info: dict) -> bool:
+        """Check if the agent has mastered the game based on completion criteria.
+
+        Call this after each episode with the info dict. Returns True if the
+        rolling average of the tracked metric exceeds the threshold.
+
+        When mastery is detected:
+        - self.mastered is set to True
+        - A 'game_mastered' event is published
+        - The dashboard shows a mastery notification
+        - Training should stop (checked by caller)
+        """
+        if not self._completion_criteria or self.mastered:
+            return self.mastered
+
+        metric_key = self._completion_criteria['metric']
+
+        # For win_rate, compute it from the winner field
+        if metric_key == 'win_rate':
+            value = 1.0 if info.get('winner') == 1 else 0.0
+        else:
+            value = float(info.get(metric_key, 0))
+
+        self._completion_metric_history.append(value)
+
+        window = self._completion_criteria.get('window', 50)
+        threshold = self._completion_criteria['threshold']
+
+        if len(self._completion_metric_history) < window:
+            return False
+
+        # Rolling average over the last `window` episodes
+        recent = self._completion_metric_history[-window:]
+        avg = sum(recent) / len(recent)
+
+        if avg >= threshold:
+            self.mastered = True
+            desc = self._completion_criteria.get('description', f'{metric_key} >= {threshold}')
+            print(f'\n{"="*60}')
+            print(f'  GAME MASTERED! {desc}')
+            print(f'  Rolling avg: {avg:.3f} (threshold: {threshold})')
+            print(f'  After {self.episode_count} episodes')
+            print(f'{"="*60}\n')
+
+            self.publish_event({
+                'type': 'game_mastered',
+                'metric': metric_key,
+                'average': avg,
+                'threshold': threshold,
+                'window': window,
+            })
+
+            # Save checkpoint immediately upon mastery
+            try:
+                algo_name = self.__class__.__name__.replace('Trainer', '').lower()
+                mastery_path = os.path.join(self.save_dir, algo_name, 'mastered')
+                self.save_checkpoint(mastery_path)
+                print(f'  Mastered model saved to: {mastery_path}')
+            except Exception as e:
+                print(f'  Warning: Could not save mastery checkpoint: {e}')
+
+            return True
+
+        return False
 
     @abstractmethod
     def train(self, num_episodes: int) -> None:

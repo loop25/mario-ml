@@ -430,6 +430,12 @@ class DQNTrainer(BaseTrainer):
                 completed=stage_completed,
             )
 
+            # Check mastery — auto-stop when game is mastered
+            if self.check_mastery(info):
+                print('  Auto-stopping: game mastered!')
+                self._save_on_exit()
+                break
+
             # Average loss for this episode
             avg_loss = episode_loss / max(loss_count, 1)
 

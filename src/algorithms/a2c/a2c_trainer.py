@@ -114,6 +114,16 @@ class A2CDashboardCallback(BaseCallback):
                         reward=reward, distance=game_metric, completed=completed,
                     )
 
+                    # Check mastery — auto-stop when game is mastered
+                    mastery_info = {info_key: game_metric}
+                    if metric_name == 'win_rate':
+                        mastery_info['winner'] = infos[i].get('winner', 0)
+                    mastery_info[metric_name] = game_metric
+                    if self.trainer.check_mastery(mastery_info):
+                        print('  Auto-stopping: game mastered!')
+                        self.trainer._save_on_exit()
+                        return False
+
                     # Track action distribution from this step
                     actions = self.locals.get('actions', [])
                     action_counts = [0] * num_actions

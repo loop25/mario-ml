@@ -121,6 +121,7 @@ class TetrisEnv(gym.Env):
         self._level = 1
         self._combo = 0
         self._last_clear_count = 0
+        self._gravity_counter = 0  # Steps since last gravity tick
 
     def reset(self):
         self.board = np.zeros((BOARD_H, BOARD_W), dtype=np.int8)
@@ -130,6 +131,7 @@ class TetrisEnv(gym.Env):
         self._level = 1
         self._combo = 0
         self._last_clear_count = 0
+        self._gravity_counter = 0
         self._next_piece_type = random.choice(PIECE_NAMES)
         self._spawn_piece()
         return self._render_obs()
@@ -140,6 +142,7 @@ class TetrisEnv(gym.Env):
         reward = 0.0
 
         # Apply action to current piece
+        hard_dropped = False
         if action == 0:    # Left
             self._try_move(0, -1)
         elif action == 1:  # Right
@@ -148,30 +151,45 @@ class TetrisEnv(gym.Env):
             self._try_rotate(1)
         elif action == 3:  # Rotate CCW
             self._try_rotate(-1)
-        elif action == 4:  # Hard drop
+        elif action == 4:  # Hard drop — instant landing, bypasses gravity
             drop_rows = 0
             while self._try_move(1, 0):
                 drop_rows += 1
             reward += drop_rows * 0.02  # Small reward for dropping
+            hard_dropped = True
 
-        # Gravity: piece falls one row
+        # Gravity: piece falls based on level speed.
+        # Higher levels = faster drops. Level 1: every 20 steps, Level 10+: every 2.
+        # Hard drops skip gravity and lock immediately.
+        if not hard_dropped:
+            gravity_interval = max(2, 22 - self._level * 2)
+            self._gravity_counter += 1
+            if self._gravity_counter < gravity_interval:
+                # No gravity this step — piece stays in place
+                if self._total_steps >= self.max_steps:
+                    return self._render_obs(), 0.0, True, self._info()
+                return self._render_obs(), reward, False, self._info()
+            self._gravity_counter = 0
+
+        # Gravity tick (or hard drop): piece falls one row
         if not self._try_move(1, 0):
             # Piece landed — lock it
             self._lock_piece()
             cleared = self._clear_lines()
             self._last_clear_count = cleared
 
-            # Scoring: reward more lines cleared at once
+            # Scoring: heavily reward line clears — this is the primary signal.
+            # Scaled so clearing lines vastly outweighs survival/death signals.
             if cleared > 0:
                 self._combo += 1
-                line_rewards = {1: 1.0, 2: 3.0, 3: 5.0, 4: 8.0}
-                reward += line_rewards.get(cleared, cleared * 2.0)
-                reward += self._combo * 0.5  # Combo bonus
+                line_rewards = {1: 10.0, 2: 30.0, 3: 50.0, 4: 80.0}
+                reward += line_rewards.get(cleared, cleared * 20.0)
+                reward += self._combo * 2.0  # Combo bonus
             else:
                 self._combo = 0
 
-            # Small reward for surviving
-            reward += 0.01
+            # Small reward for surviving (piece placed successfully)
+            reward += 0.1
 
             # Level up every 10 lines
             self._level = 1 + self._lines_cleared // 10

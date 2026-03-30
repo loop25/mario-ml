@@ -70,6 +70,9 @@ class ConnectFourEnv(gym.Env):
         self._drop_piece(action, player=1)
         self._pieces_played += 1
 
+        # Small reward for center column play (strategically valuable)
+        step_reward = 0.01 if action == COLS // 2 else 0.0
+
         # Check if player 1 wins
         if self._check_winner(1):
             self._winner = 1
@@ -101,9 +104,9 @@ class ConnectFourEnv(gym.Env):
 
         # Check draw after opponent move
         if self._pieces_played >= ROWS * COLS:
-            return self._render_obs(), 0.0, True, self._info()
+            return self._render_obs(), step_reward, True, self._info()
 
-        return self._render_obs(), 0.0, False, self._info()
+        return self._render_obs(), step_reward, False, self._info()
 
     def _is_valid_column(self, col: int) -> bool:
         return 0 <= col < COLS and self.board[0, col] == 0

@@ -58,14 +58,22 @@ class SnakeAdapter(BaseGameAdapter):
         )
 
     def get_reward_config(self) -> RewardConfig:
+        # Snake: food reward is +1.0, death is -1.0 intrinsically.
+        # Keep death penalty mild so food-seeking dominates learning.
         return RewardConfig(
-            time_penalty_per_second=0.005,
+            time_penalty_per_second=0.001,   # Very mild — encourage efficiency
             completion_bonus=100.0,
-            death_penalty=-10.0,
-            idle_penalty_per_second=0.003,
+            death_penalty=-2.0,              # Mild — matches game's own -1.0 scale
+            idle_penalty_per_second=0.001,
             speed_bonus_multiplier=1.0,
-            par_time_seconds=60.0,
+            par_time_seconds=120.0,
         )
+
+    def get_training_hints(self) -> dict:
+        return {
+            'ent_coef': 0.03,   # Higher exploration for spatial navigation
+            'gamma': 0.995,     # Value future food more
+        }
 
     def supported_algorithms(self) -> List[str]:
         # NEAT requires small flat obs (13x13); Snake uses 84x84 images.

@@ -66,14 +66,23 @@ class ChessAdapter(BaseGameAdapter):
         return ['ppo', 'dqn', 'a2c', 'rainbow', 'dt']
 
     def get_reward_config(self) -> RewardConfig:
+        # Board game: win/loss signals are +-1.0, so death penalty must stay
+        # proportional. A -2.0 penalty means losing costs 2x a win — enough
+        # to discourage losing without creating risk-aversion.
         return RewardConfig(
             time_penalty_per_second=0.0,
-            completion_bonus=50.0,
-            death_penalty=-10.0,
+            completion_bonus=5.0,
+            death_penalty=-2.0,
             idle_penalty_per_second=0.0,
             speed_bonus_multiplier=0.0,
             par_time_seconds=600.0,
         )
+
+    def get_training_hints(self) -> dict:
+        return {
+            'ent_coef': 0.05,    # High exploration for large action space
+            'gamma': 0.99,
+        }
 
     def get_dashboard_config(self) -> dict:
         return {

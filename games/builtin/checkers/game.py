@@ -111,29 +111,46 @@ class CheckersEnv(gym.Env):
             from_pos, to_pos = random.choice(valid_moves)
             invalid_penalty = -0.1
 
+        # Count pieces before agent move (for capture detection)
+        opp_pieces_before = sum(1 for p in self.board if p in (P2_MAN, P2_KING))
+
         # Execute agent move
         self._last_from = from_pos
         self._last_to = to_pos
         self._execute_move(from_pos, to_pos)
         self._moves_played += 1
 
-        # Check promotion
+        # Check promotion (reward for king promotion)
+        was_king_before = self.board[to_pos] in (P1_KING,)
         self._check_promotion()
+        step_reward = invalid_penalty
+
+        # Reward for capturing an opponent piece
+        opp_pieces_after = sum(1 for p in self.board if p in (P2_MAN, P2_KING))
+        if opp_pieces_after < opp_pieces_before:
+            step_reward += 0.1  # Capture bonus
+
+        # Reward for king promotion
+        if not was_king_before and self.board[to_pos] == P1_KING:
+            step_reward += 0.05
 
         # Check if opponent has no pieces or no moves
         if self._player_lost(player=2):
             self._winner = 1
-            return self._render_obs(), 1.0, True, self._info()
+            return self._render_obs(), 1.0 + step_reward, True, self._info()
 
         # Max move limit
         if self._moves_played >= self._max_moves:
-            return self._render_obs(), 0.0, True, self._info()
+            return self._render_obs(), step_reward, True, self._info()
 
-        # Opponent turn (random valid move)
+        # Count agent pieces before opponent move
+        agent_pieces_before = sum(1 for p in self.board if p in (P1_MAN, P1_KING))
+
+        # Opponent turn
         opp_moves = self._get_valid_moves(player=2)
         if not opp_moves:
             self._winner = 1
-            return self._render_obs(), 1.0, True, self._info()
+            return self._render_obs(), 1.0 + step_reward, True, self._info()
 
         board_state = {
             'board': self.board,
@@ -150,15 +167,20 @@ class CheckersEnv(gym.Env):
         self._moves_played += 1
         self._check_promotion()
 
+        # Penalty for losing a piece to opponent
+        agent_pieces_after = sum(1 for p in self.board if p in (P1_MAN, P1_KING))
+        if agent_pieces_after < agent_pieces_before:
+            step_reward -= 0.1
+
         # Check if agent has no pieces or no moves
         if self._player_lost(player=1):
             self._winner = 2
-            return self._render_obs(), -1.0, True, self._info()
+            return self._render_obs(), -1.0 + step_reward, True, self._info()
 
         if self._moves_played >= self._max_moves:
-            return self._render_obs(), 0.0, True, self._info()
+            return self._render_obs(), step_reward, True, self._info()
 
-        return self._render_obs(), invalid_penalty, False, self._info()
+        return self._render_obs(), step_reward, False, self._info()
 
     def _get_valid_moves(self, player: int):
         """Get all valid moves for a player. Captures are mandatory."""

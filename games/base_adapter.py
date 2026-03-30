@@ -119,6 +119,18 @@ class BaseGameAdapter(ABC):
         except TypeError:
             return env.render()
 
+    def get_training_hints(self) -> dict:
+        """Return per-algorithm hyperparameter overrides for this game.
+
+        Games with different dynamics (puzzle vs platformer vs board) benefit
+        from different hyperparameters. This method lets each game suggest
+        optimal overrides that are merged on top of the default config YAML.
+
+        Returns dict of {algo_name: {param: value}} or global {param: value}.
+        Example: {'ent_coef': 0.05, 'ppo': {'n_steps': 1024}}
+        """
+        return {}
+
     def get_game_specific_options(self) -> dict:
         """Return dict of option_name -> (type, default, description)
         for the launcher GUI to display game-specific settings.

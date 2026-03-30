@@ -665,6 +665,12 @@ class RainbowTrainer(BaseTrainer):
                 completed=completed,
             )
 
+            # Check mastery — auto-stop when game is mastered
+            if self.check_mastery(info):
+                print('  Auto-stopping: game mastered!')
+                self._save_on_exit()
+                break
+
             # Average loss
             avg_loss = episode_loss / max(loss_count, 1)
 

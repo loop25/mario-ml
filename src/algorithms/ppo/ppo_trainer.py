@@ -261,6 +261,25 @@ class DashboardCallback(BaseCallback):
             completed=self._env_stage_completed[env_index],
         )
 
+        # Check mastery — auto-stop when agent has mastered the game.
+        # Build an info dict with the relevant metric for check_mastery.
+        mastery_info = {self._info_key: game_metric}
+        if self._metric_name == 'win_rate':
+            mastery_info['winner'] = 1 if self._env_stage_completed[env_index] else 0
+            # Also pass raw winner value from the last info if available
+            try:
+                vec_env = self.trainer.vec_env
+                last_info = self.locals.get('infos', [{}])
+                if env_index < len(last_info):
+                    mastery_info['winner'] = last_info[env_index].get('winner', 0)
+            except Exception:
+                pass
+        mastery_info[self._metric_name] = game_metric
+        if self.trainer.check_mastery(mastery_info):
+            print('  Auto-stopping: game mastered! Saving final model...')
+            self.trainer._save_on_exit()
+            return False  # Stop training
+
         # Update dashboard
         if self.dashboard:
             loss = 0.0  # Updated in _on_rollout_end instead
@@ -479,6 +498,16 @@ class PPOTrainer(BaseTrainer):
                 for wrapper in env_wrappers
             ])
             print(f'  PPO: Using DummyVecEnv with {num_envs} environments (same process)')
+
+        # Frame stacking: stack N frames to give the CNN temporal information.
+        # Without this, the agent sees a single static image and can't perceive
+        # motion (e.g., which direction a Tetris piece is falling).
+        # Mario's create_cnn_env() handles its own stacking, so we only apply
+        # this for non-Mario games (single-channel observations).
+        n_stack = self.config.get('frame_stack', 4)
+        obs_shape = vec_env.observation_space.shape  # (H, W, C) before transpose
+        if obs_shape and len(obs_shape) == 3 and obs_shape[-1] == 1:
+            vec_env = VecFrameStack(vec_env, n_stack=n_stack)
 
         # Transpose observations to channel-first (H,W,C) -> (C,H,W)
         vec_env = VecTransposeImage(vec_env)

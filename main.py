@@ -783,6 +783,24 @@ def main():
             e = create_env_from_adapter(_adapter, **_gk)
             return SB3CompatWrapper(e)
 
+    # Apply game-specific training hints on top of default config.
+    # Each adapter can override hyperparameters (e.g., Tetris wants higher
+    # entropy for exploration, lower death penalty, etc.).
+    def _apply_training_hints(config, adapter, algorithm):
+        if adapter is None:
+            return config
+        hints = adapter.get_training_hints()
+        if not hints:
+            return config
+        # Apply algo-specific hints first, then global hints
+        algo_hints = hints.pop(algorithm, {}) if isinstance(hints.get(algorithm), dict) else {}
+        for key, val in hints.items():
+            if not isinstance(val, dict):  # Skip nested algo dicts
+                config[key] = val
+        for key, val in algo_hints.items():
+            config[key] = val
+        return config
+
     if args.algorithm == 'neat':
         from src.algorithms.neat.neat_trainer import NEATTrainer
         from src.algorithms.neat.parallel_eval import ParallelGenomeEvaluator
@@ -801,6 +819,7 @@ def main():
         config_path = os.path.join(project_root, 'config', 'ppo_config.yaml')
         with open(config_path, 'r') as f:
             config = yaml.safe_load(f)
+        config = _apply_training_hints(config, game_adapter, 'ppo')
         trainer = PPOTrainer(
             env=env,
             config=config,
@@ -817,6 +836,7 @@ def main():
         config_path = os.path.join(project_root, 'config', 'dqn_config.yaml')
         with open(config_path, 'r') as f:
             config = yaml.safe_load(f)
+        config = _apply_training_hints(config, game_adapter, 'dqn')
         trainer = DQNTrainer(
             env=env,
             config=config,
@@ -833,6 +853,7 @@ def main():
         config_path = os.path.join(project_root, 'config', 'a2c_config.yaml')
         with open(config_path, 'r') as f:
             config = yaml.safe_load(f)
+        config = _apply_training_hints(config, game_adapter, 'a2c')
         trainer = A2CTrainer(
             env=env,
             config=config,
@@ -847,6 +868,7 @@ def main():
         config_path = os.path.join(project_root, 'config', 'rainbow_config.yaml')
         with open(config_path, 'r') as f:
             config = yaml.safe_load(f)
+        config = _apply_training_hints(config, game_adapter, 'rainbow')
         trainer = RainbowTrainer(
             env=env,
             config=config,
@@ -859,6 +881,14 @@ def main():
 
     # Tag the trainer with the game so metadata.json records it.
     trainer.game_id = args.game
+
+    # Set completion criteria for auto-stop when game is mastered.
+    # Each adapter defines what "mastered" means (e.g., 95% win rate
+    # over 100 games for TicTacToe, avg lines > 20 for Tetris).
+    if game_adapter:
+        criteria = game_adapter.get_completion_criteria()
+        if criteria:
+            trainer.set_completion_criteria(criteria)
 
     # Initialize event bus and achievement tracking
     event_bus = EventBus()

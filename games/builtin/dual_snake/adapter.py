@@ -56,22 +56,29 @@ class DualSnakeAdapter(BaseGameAdapter):
         s2_len = info.get('snake2_length', 1)
         max_len = info.get('max_length', 256)
         total_len = s1_len + s2_len
+        score = float(info.get('score', 0))
         return StandardMetrics(
             progress=total_len / max_len,
-            score=float(info.get('score', 0)),
-            completed=False,  # No fixed win condition
+            score=score,
+            completed=(score >= 30),  # High cooperative score = completed
             time_elapsed=episode_time,
         )
 
     def get_reward_config(self) -> RewardConfig:
         return RewardConfig(
-            time_penalty_per_second=0.005,
+            time_penalty_per_second=0.001,
             completion_bonus=100.0,
-            death_penalty=-10.0,
-            idle_penalty_per_second=0.003,
+            death_penalty=-2.0,
+            idle_penalty_per_second=0.001,
             speed_bonus_multiplier=1.0,
-            par_time_seconds=60.0,
+            par_time_seconds=120.0,
         )
+
+    def get_training_hints(self) -> dict:
+        return {
+            'ent_coef': 0.03,
+            'gamma': 0.995,
+        }
 
     def supported_algorithms(self) -> List[str]:
         return ['ppo', 'dqn', 'a2c', 'rainbow', 'dt']
