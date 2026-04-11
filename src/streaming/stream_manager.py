@@ -41,7 +41,7 @@ class StreamManager:
         width: int = 1280,
         height: int = 720,
         fps: int = 30,
-        video_bitrate: str = '6000k',
+        video_bitrate: str = '4500k',
         audio_file: Optional[str] = None,
         audio_files: Optional[list] = None,
     ):
@@ -74,17 +74,23 @@ class StreamManager:
         self._auto_reconnect = True
         self._last_frame: Optional[np.ndarray] = None
 
+        # Frame pump: a background thread that sends the last frame to
+        # ffmpeg at a steady fps regardless of how fast the dashboard
+        # produces new frames. This prevents bitrate drops when training
+        # computation causes gaps in frame delivery.
+        self._frame_pump_thread: Optional[threading.Thread] = None
+        self._frame_pump_running = False
+        self._frame_lock = threading.Lock()
+
     def _build_ffmpeg_command(self) -> list:
         cmd = ['ffmpeg', '-y']
 
-        # Video input: raw RGB frames from pipe
-        # -use_wallclock_as_timestamps: timestamps based on wall clock,
-        #   not frame count — critical when frames arrive slower than fps
-        # -thread_queue_size: large buffer so slow frame delivery doesn't
-        #   cause the audio queue to overflow and crash
+        # Video input: raw RGB frames from pipe.
+        # The frame pump thread delivers frames at a steady fps, so we
+        # do NOT use -use_wallclock_as_timestamps (that caused bitrate
+        # collapse when frames arrived slowly).
         cmd += [
-            '-thread_queue_size', '512',
-            '-use_wallclock_as_timestamps', '1',
+            '-thread_queue_size', '1024',
             '-f', 'rawvideo',
             '-pixel_format', 'rgb24',
             '-video_size', f'{self.width}x{self.height}',
@@ -248,6 +254,11 @@ class StreamManager:
         self._health_thread = threading.Thread(target=self._monitor_health, daemon=True)
         self._health_thread.start()
 
+        # Start frame pump — sends last frame at steady fps to ffmpeg
+        self._frame_pump_running = True
+        self._frame_pump_thread = threading.Thread(target=self._frame_pump_loop, daemon=True)
+        self._frame_pump_thread.start()
+
         # Register atexit handler so ffmpeg is killed even if the Python
         # process is terminated abruptly (e.g. launcher force-kill).
         atexit.register(self._atexit_cleanup)
@@ -264,6 +275,7 @@ class StreamManager:
         if not self.is_streaming and self._process is None:
             return
         self.is_streaming = False
+        self._frame_pump_running = False
         self._kill_ffmpeg()
         self._cleanup_concat_file()
 
@@ -314,24 +326,61 @@ class StreamManager:
         self._cleanup_concat_file()
 
     def send_frame(self, frame: np.ndarray) -> None:
-        if not self.is_streaming or self._process is None:
-            # Try auto-reconnect if we were streaming and lost connection
-            if self._auto_reconnect and self._last_frame is not None:
-                self._try_reconnect()
+        """Update the frame that the pump thread sends to ffmpeg.
+
+        This does NOT write to ffmpeg directly — the frame pump thread
+        handles that at a steady fps. This just updates the latest frame
+        so the pump always has fresh content to send.
+        """
+        if frame is None:
             return
         try:
             if frame.shape[0] != self.height or frame.shape[1] != self.width:
                 import cv2
                 frame = cv2.resize(frame, (self.width, self.height))
-            self._last_frame = frame
-            self._process.stdin.write(frame.tobytes())
-            self._frame_count += 1
-            self._reconnect_attempts = 0  # Reset on successful send
-        except (BrokenPipeError, OSError):
-            self.is_streaming = False
-            self.error_message = 'Stream connection lost'
-            print(f'[Stream] WARNING: Connection lost, will auto-reconnect...')
-            self._try_reconnect()
+            with self._frame_lock:
+                self._last_frame = frame
+        except Exception:
+            pass
+
+    def _frame_pump_loop(self) -> None:
+        """Background thread: sends frames to ffmpeg at a steady fps.
+
+        Even when the dashboard only updates at 5fps during heavy training,
+        this thread keeps sending the last frame at 30fps so ffmpeg always
+        has data to encode and the bitrate stays stable.
+        """
+        interval = 1.0 / self.fps
+        # Create a black frame as initial placeholder
+        blank = np.zeros((self.height, self.width, 3), dtype=np.uint8)
+
+        while self._frame_pump_running:
+            t0 = time.time()
+
+            if self._process is None or not self.is_streaming:
+                time.sleep(0.1)
+                continue
+
+            # Get the latest frame (or blank if none yet)
+            with self._frame_lock:
+                frame = self._last_frame if self._last_frame is not None else blank
+
+            try:
+                self._process.stdin.write(frame.tobytes())
+                self._frame_count += 1
+                self._reconnect_attempts = 0
+            except (BrokenPipeError, OSError):
+                self.is_streaming = False
+                self.error_message = 'Stream connection lost'
+                print(f'[Stream] WARNING: Connection lost, will auto-reconnect...')
+                self._try_reconnect()
+                continue
+
+            # Sleep to maintain target fps
+            elapsed = time.time() - t0
+            sleep_time = interval - elapsed
+            if sleep_time > 0:
+                time.sleep(sleep_time)
 
     def _try_reconnect(self) -> None:
         """Attempt to reconnect the stream after a dropped connection."""
