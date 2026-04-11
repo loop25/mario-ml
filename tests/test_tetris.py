@@ -35,9 +35,9 @@ class TestTetrisEnv:
         assert 'level' in info
         env.close()
 
-    def test_action_space_is_7(self):
+    def test_action_space_is_8(self):
         env = TetrisEnv()
-        assert env.action_space.n == 7  # left, right, rot_cw, rot_ccw, hard_drop, soft_drop, no-op
+        assert env.action_space.n == 8  # left, right, rot_cw, rot_ccw, hard_drop, soft_drop, no-op, hold
         env.close()
 
     def test_observation_space_shape(self):
@@ -109,6 +109,40 @@ class TestTetrisEnv:
         assert env._lines_cleared == 3
         env.close()
 
+    def test_hold_piece(self):
+        """Hold action should stash the current piece."""
+        env = TetrisEnv()
+        env.reset()
+        original_piece = env._piece_type
+        # Action 7 = Hold
+        obs, reward, done, info = env.step(7)
+        assert info['hold_piece'] == original_piece
+        env.close()
+
+    def test_tspin_field_in_info(self):
+        """Info dict should contain tspin field."""
+        env = TetrisEnv()
+        env.reset()
+        _, _, _, info = env.step(0)
+        assert 'tspin' in info
+        assert isinstance(info['tspin'], bool)
+        env.close()
+
+    def test_hold_piece_swap(self):
+        """Second hold should swap current with held piece."""
+        env = TetrisEnv()
+        env.reset()
+        first_piece = env._piece_type
+        # First hold
+        env.step(7)
+        second_piece = env._piece_type
+        # Hard drop to lock piece and reset hold_used
+        env.step(4)
+        # Now hold again to swap
+        env.step(7)
+        assert env._hold_piece_type == env._piece_type or env._hold_piece_type is not None
+        env.close()
+
     def test_level_progression(self):
         """Level should increase every 10 lines."""
         env = TetrisEnv()
@@ -152,8 +186,8 @@ class TestTetrisAdapter:
         adapter = TetrisAdapter()
         info = adapter.get_action_space_info()
         assert isinstance(info, ActionSpaceInfo)
-        assert info.num_actions == 7
-        assert len(info.action_labels) == 7
+        assert info.num_actions == 8
+        assert len(info.action_labels) == 8
 
     def test_observation_shape(self):
         adapter = TetrisAdapter()

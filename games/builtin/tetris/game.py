@@ -4,7 +4,8 @@ Tetris game engine as a Gym environment.
 A self-contained Tetris implementation following the Gym interface.
 Standard 10-wide, 20-tall board with 7 tetrominoes (I, O, T, S, Z, J, L).
 
-Actions: 0=left, 1=right, 2=rotate_cw, 3=rotate_ccw, 4=drop (hard drop)
+Actions: 0=left, 1=right, 2=rotate_cw, 3=rotate_ccw, 4=drop (hard drop),
+         5=soft_drop, 6=no-op, 7=hold
 
 Observations: 84x84 grayscale images (board rendering).
 """
@@ -100,8 +101,8 @@ class TetrisEnv(gym.Env):
         self.render_size = render_size
         self.max_steps = max_steps
 
-        # 7 actions: left, right, rotate_cw, rotate_ccw, hard_drop, soft_drop, no-op
-        self.action_space = Discrete(7)
+        # 8 actions: left, right, rotate_cw, rotate_ccw, hard_drop, soft_drop, no-op, hold
+        self.action_space = Discrete(8)
         self.observation_space = Box(
             low=0, high=255,
             shape=(render_size, render_size, 1),
@@ -122,6 +123,10 @@ class TetrisEnv(gym.Env):
         self._combo = 0
         self._last_clear_count = 0
         self._gravity_counter = 0  # Steps since last gravity tick
+        self._hold_piece_type = None
+        self._hold_used = False
+        self._last_was_tspin = False
+        self._last_action_was_rotate = False
 
     def reset(self):
         self.board = np.zeros((BOARD_H, BOARD_W), dtype=np.int8)
@@ -132,6 +137,10 @@ class TetrisEnv(gym.Env):
         self._combo = 0
         self._last_clear_count = 0
         self._gravity_counter = 0
+        self._hold_piece_type = None
+        self._hold_used = False
+        self._last_was_tspin = False
+        self._last_action_was_rotate = False
         self._next_piece_type = random.choice(PIECE_NAMES)
         self._spawn_piece()
         return self._render_obs()
@@ -139,7 +148,11 @@ class TetrisEnv(gym.Env):
     def step(self, action):
         self._total_steps += 1
         self._last_clear_count = 0  # Reset flash from previous frame
+        self._last_was_tspin = False
         reward = 0.0
+
+        # Track rotation for T-spin detection
+        self._last_action_was_rotate = (action in (2, 3))
 
         # Apply action to current piece
         hard_dropped = False
@@ -160,6 +173,22 @@ class TetrisEnv(gym.Env):
             hard_dropped = True
         elif action == 5:  # Soft drop — force gravity this step
             force_gravity = True
+        elif action == 7:  # Hold piece
+            if not self._hold_used:
+                self._hold_used = True
+                if self._hold_piece_type is None:
+                    # First hold: stash current, spawn next
+                    self._hold_piece_type = self._piece_type
+                    self._spawn_piece()
+                else:
+                    # Swap current with held
+                    old_hold = self._hold_piece_type
+                    self._hold_piece_type = self._piece_type
+                    self._piece_type = old_hold
+                    self._rotation = 0
+                    self._piece = TETROMINOES[self._piece_type][0]
+                    self._piece_row = 0
+                    self._piece_col = BOARD_W // 2 - 1
         # action == 6: No-op — do nothing, let gravity handle it
 
         # Gravity: piece falls based on level speed.
@@ -179,7 +208,9 @@ class TetrisEnv(gym.Env):
         # Gravity tick (or hard drop): piece falls one row
         if not self._try_move(1, 0):
             # Piece landed — lock it
+            locked_piece_type = self._piece_type
             self._lock_piece()
+            self._hold_used = False  # Allow hold again after piece locks
             cleared = self._clear_lines()
             self._last_clear_count = cleared
 
@@ -191,6 +222,12 @@ class TetrisEnv(gym.Env):
                 line_rewards = {1: 10.0, 2: 30.0, 3: 50.0, 4: 80.0}
                 reward += line_rewards.get(cleared, cleared * 20.0)
                 reward += self._combo * 2.0  # Combo bonus
+
+                # T-spin bonus: doubled line clear reward
+                if self._check_tspin(locked_piece_type):
+                    tspin_bonus = {1: 20.0, 2: 60.0, 3: 100.0}
+                    reward += tspin_bonus.get(cleared, cleared * 30.0)
+                    self._last_was_tspin = True
             else:
                 self._combo = 0
 
@@ -296,12 +333,55 @@ class TetrisEnv(gym.Env):
 
         return cleared
 
+    def _check_tspin(self, locked_piece_type: str) -> bool:
+        """Check if the last locked piece was a T-spin.
+
+        A T-spin occurs when:
+        1. The piece was a T piece
+        2. The last action was a rotation
+        3. At least 3 of the 4 corners around the T center are occupied
+        """
+        if locked_piece_type != 'T':
+            return False
+        if not self._last_action_was_rotate:
+            return False
+
+        # T center is at (piece_row + center_dr, piece_col + center_dc)
+        # For the T piece, the center of rotation is at offset (0,1) for rot 0,
+        # (1,0) for rot 1, (1,1) for rot 2, (1,0) for rot 3.
+        # Simplified: check the 4 diagonal corners around the piece origin area.
+        cr = self._piece_row
+        cc = self._piece_col
+
+        # The T-piece center varies by rotation, but we can approximate by
+        # checking corners around the bounding box center
+        center_r = cr
+        center_c = cc + 1  # Most T rotations center around col+1
+
+        corners = [
+            (center_r - 1, center_c - 1),
+            (center_r - 1, center_c + 1),
+            (center_r + 1, center_c - 1),
+            (center_r + 1, center_c + 1),
+        ]
+
+        occupied = 0
+        for r, c in corners:
+            if r < 0 or r >= BOARD_H or c < 0 or c >= BOARD_W:
+                occupied += 1  # Wall/floor counts as occupied
+            elif self.board[r, c] != 0:
+                occupied += 1
+
+        return occupied >= 3
+
     def _info(self) -> dict:
         return {
             'score': self._score,
             'lines_cleared': self._lines_cleared,
             'level': self._level,
             'total_steps': self._total_steps,
+            'hold_piece': self._hold_piece_type or '',
+            'tspin': self._last_was_tspin,
         }
 
     # ------------------------------------------------------------------

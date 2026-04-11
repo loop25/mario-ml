@@ -39,8 +39,8 @@ class TetrisAdapter(BaseGameAdapter):
 
     def get_action_space_info(self) -> ActionSpaceInfo:
         return ActionSpaceInfo(
-            num_actions=7,
-            action_labels=['Left', 'Right', 'Rot CW', 'Rot CCW', 'Drop', 'Soft Drop', 'Wait'],
+            num_actions=8,
+            action_labels=['Left', 'Right', 'Rot CW', 'Rot CCW', 'Drop', 'Soft Drop', 'Wait', 'Hold'],
         )
 
     def get_observation_shape(self) -> Tuple[int, ...]:

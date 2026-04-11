@@ -38,11 +38,12 @@ class DualSnakeEnv(gym.Env):
     metadata = {'render.modes': ['rgb_array']}
 
     def __init__(self, grid_size: int = 16, render_size: int = 84,
-                 max_steps_without_food: int = 0):
+                 max_steps_without_food: int = 0, mode: str = 'cooperative'):
         super().__init__()
         self.grid_size = grid_size
         self.render_size = render_size
         self.max_steps_without_food = max_steps_without_food or grid_size * grid_size
+        self.mode = mode  # 'cooperative' or 'competitive'
 
         # Discrete(16): action = s1_action * 4 + s2_action
         self.action_space = Discrete(16)
@@ -104,6 +105,8 @@ class DualSnakeEnv(gym.Env):
         a2 = action % 4
 
         reward = 0.0
+        was_dead1 = self._dead1
+        was_dead2 = self._dead2
 
         # Update directions (prevent 180-degree reversal)
         if not self._dead1 and (a1 + 2) % 4 != self.dir1:
@@ -112,6 +115,7 @@ class DualSnakeEnv(gym.Env):
             self.dir2 = a2
 
         # Move snake 1
+        s1_ate = False
         if not self._dead1:
             head1 = self.snake1[0]
             dr, dc = self._directions[self.dir1]
@@ -132,12 +136,13 @@ class DualSnakeEnv(gym.Env):
                 if new_head1 == self.food:
                     self._score += 1
                     self._steps_since_food = 0
-                    reward += 1.0
+                    s1_ate = True
                     self._place_food()
                 else:
                     self.snake1.pop()
 
         # Move snake 2
+        s2_ate = False
         if not self._dead2:
             head2 = self.snake2[0]
             dr, dc = self._directions[self.dir2]
@@ -155,21 +160,49 @@ class DualSnakeEnv(gym.Env):
                 if new_head2 == self.food:
                     self._score += 1
                     self._steps_since_food = 0
-                    reward += 1.0
+                    s2_ate = True
                     self._place_food()
                 else:
                     self.snake2.pop()
 
-        # One dead = penalty but game continues (the other still plays)
-        # Only apply penalty on the step the snake dies
-        if self._dead1 and not self._dead2 and self._step_count == self._step_count:
-            # Check if snake1 just died this step by seeing if reward includes
-            # wall/self/cross collision (we set _dead1 above in this step)
-            pass
-        # We handle death penalty via done flag tracking below
+        # --- Reward logic based on mode ---
+        if self.mode == 'competitive':
+            # Food rewards: eater gets +1.0, other gets -0.5
+            if s1_ate:
+                reward += 1.0 - 0.5  # Net: +0.5 (s1 eats, s2 penalized)
+            if s2_ate:
+                reward += 1.0 - 0.5  # Net: +0.5 (s2 eats, s1 penalized)
 
-        # Both dead = game over
-        done = (self._dead1 and self._dead2)
+            # Death penalty for the snake that just died
+            if self._dead1 and not was_dead1:
+                reward -= 0.5  # Snake 1 died
+                if not self._dead2:
+                    reward += 0.5  # Snake 2 survives opponent death bonus
+            if self._dead2 and not was_dead2:
+                reward -= 0.5  # Snake 2 died
+                if not self._dead1:
+                    reward += 0.5  # Snake 1 survives opponent death bonus
+
+            # In competitive mode, game ends when one snake is left or both dead
+            done = (self._dead1 and self._dead2)
+            if (self._dead1 and not self._dead2) or (self._dead2 and not self._dead1):
+                done = True
+        else:
+            # Cooperative mode (default)
+            if s1_ate:
+                reward += 1.0
+            if s2_ate:
+                reward += 1.0
+
+            # Death penalty: -0.5 per snake that just died
+            if self._dead1 and not was_dead1:
+                reward -= 0.5
+            if self._dead2 and not was_dead2:
+                reward -= 0.5
+
+            # Both dead = game over
+            done = (self._dead1 and self._dead2)
+
         # Timeout
         if self._steps_since_food >= self.max_steps_without_food:
             done = True
@@ -181,6 +214,7 @@ class DualSnakeEnv(gym.Env):
             'snake1_alive': not self._dead1,
             'snake2_alive': not self._dead2,
             'steps': self._step_count,
+            'mode': self.mode,
         }
 
         return self._render_obs(), reward, done, info

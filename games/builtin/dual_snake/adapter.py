@@ -36,7 +36,8 @@ class DualSnakeAdapter(BaseGameAdapter):
 
     def create_env(self, **kwargs) -> gym.Env:
         grid_size = kwargs.get('grid_size', 16)
-        return DualSnakeEnv(grid_size=grid_size)
+        mode = kwargs.get('mode', 'cooperative')
+        return DualSnakeEnv(grid_size=grid_size, mode=mode)
 
     def get_action_space_info(self) -> ActionSpaceInfo:
         return ActionSpaceInfo(
@@ -103,4 +104,5 @@ class DualSnakeAdapter(BaseGameAdapter):
     def get_game_specific_options(self) -> dict:
         return {
             'grid_size': (int, 16, 'Grid size (8, 16, or 32)'),
+            'mode': (str, 'cooperative', 'Game mode: cooperative or competitive'),
         }

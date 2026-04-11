@@ -12,7 +12,7 @@ python-chess ordering (a1=0, b1=1, ..., h8=63). The action space is
 Discrete(4096) — most actions are invalid at any given time. Invalid
 moves result in a forfeit (reward -1).
 
-Promotions default to queen. The agent cannot choose underpromotion.
+Promotions try queen first, then knight, rook, bishop (for underpromotion).
 
 Observations: 84x84 grayscale image.
 """
@@ -82,13 +82,18 @@ class ChessEnv(gym.Env):
         from_sq = action // NUM_SQUARES
         to_sq = action % NUM_SQUARES
 
-        # Build the move — try promotion to queen if it's a pawn reaching
-        # the last rank
+        # Build the move — try promotion if pawn reaching last rank
         move = chess.Move(from_sq, to_sq)
         piece = self.board.piece_at(from_sq)
         if (piece is not None and piece.piece_type == chess.PAWN
                 and chess.square_rank(to_sq) in (0, 7)):
-            move = chess.Move(from_sq, to_sq, promotion=chess.QUEEN)
+            # Try queen first (most common), then knight (useful for forks),
+            # then rook, then bishop
+            for promo in [chess.QUEEN, chess.KNIGHT, chess.ROOK, chess.BISHOP]:
+                candidate = chess.Move(from_sq, to_sq, promotion=promo)
+                if candidate in self.board.legal_moves:
+                    move = candidate
+                    break
 
         # Validate move
         if move not in self.board.legal_moves:
