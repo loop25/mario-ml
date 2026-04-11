@@ -696,6 +696,14 @@ class MarioLauncher:
         ).pack()
         self._bind_tooltip(dt_btn, dt_info["tooltip"])
 
+        # DT readiness indicator — shows trajectory collection status
+        self.dt_readiness_label = tk.Label(
+            dt_frame, text="",
+            font=("Segoe UI", 8), fg=TEXT_DIM, bg=BG_DARK,
+        )
+        self.dt_readiness_label.pack(anchor="w")
+        self._update_dt_readiness()
+
         self.algo_desc_label = tk.Label(
             parent, text="",
             font=("Segoe UI", 9), fg=TEXT_DIM, bg=BG_DARK,
@@ -1836,6 +1844,38 @@ class MarioLauncher:
         """Add hover color change to a widget (additive, won't replace other bindings)."""
         widget.bind('<Enter>', lambda e: widget.configure(bg=enter_bg), add='+')
         widget.bind('<Leave>', lambda e: widget.configure(bg=leave_bg), add='+')
+
+    def _update_dt_readiness(self):
+        """Update the DT readiness indicator with trajectory collection stats."""
+        try:
+            from src.experience.experience_store import ExperienceStore
+            store = ExperienceStore(store_dir='experience_store')
+            stats = store.stats()
+            total = stats.get('total_trajectories', 0)
+            games = stats.get('games', {})
+
+            if total == 0:
+                text = "No training data yet — train games with PPO/DQN/A2C to collect data"
+                color = TEXT_DIM
+            else:
+                game_parts = []
+                for gid, count in sorted(games.items()):
+                    game_parts.append(f"{gid}: {count}")
+                games_str = ", ".join(game_parts) if game_parts else "unknown"
+                min_needed = 50
+                if total >= min_needed:
+                    text = f"Ready to train! {total} episodes collected ({games_str})"
+                    color = ACCENT_GREEN
+                else:
+                    text = f"{total}/{min_needed} episodes ({games_str}) — need more data"
+                    color = "#ffaa00"
+
+            self.dt_readiness_label.configure(text=text, fg=color)
+        except Exception:
+            self.dt_readiness_label.configure(
+                text="Train any game to start collecting DT data",
+                fg=TEXT_DIM,
+            )
 
     def _update_algo_desc(self):
         """Update the algorithm description text below the buttons."""
@@ -3061,6 +3101,9 @@ class MarioLauncher:
         self.process = None
         self._disable_controls(False)
         self._update_start_button_text()
+
+        # Refresh DT readiness — training may have added trajectories
+        self._update_dt_readiness()
 
         if retcode == 0:
             self._set_status(
