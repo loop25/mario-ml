@@ -315,6 +315,7 @@ class DTTrainer:
         target_return: float,
         num_episodes: int = 5,
         max_steps: int = 1000,
+        visualizer=None,
     ) -> float:
         """Evaluate the DT on a specific game environment.
 
@@ -324,6 +325,7 @@ class DTTrainer:
             target_return: Desired return-to-go (conditions the DT).
             num_episodes: Number of evaluation episodes.
             max_steps: Maximum steps per episode.
+            visualizer: Optional Dashboard for live gameplay display.
 
         Returns:
             Mean reward across evaluation episodes.
@@ -399,14 +401,34 @@ class DTTrainer:
                 total_reward += reward
                 remaining_return -= reward
 
+                # Live visualization — show the DT playing the game
+                if visualizer and step % 4 == 0:
+                    try:
+                        from src.visualization.frame_capture import capture_display_frame
+                        frame = capture_display_frame(env, fallback_obs=obs)
+                        if frame is not None:
+                            metrics = {
+                                'episode': ep + 1,
+                                'reward': total_reward,
+                                'score': total_reward,
+                            }
+                            if not visualizer.update(
+                                frame=frame, metrics=metrics,
+                            ):
+                                break  # Dashboard closed
+                    except Exception:
+                        pass
+
                 if done:
                     break
 
             rewards.append(total_reward)
+            print(f'  Episode {ep+1}/{num_episodes}: reward={total_reward:.1f}')
 
         mean_reward = float(np.mean(rewards))
+        std_reward = float(np.std(rewards))
         print(
-            f'DT evaluation on game {game_token_id}: '
-            f'{mean_reward:.1f} mean reward over {num_episodes} episodes'
+            f'\nDT evaluation on game {game_token_id}: '
+            f'{mean_reward:.1f} +/- {std_reward:.1f} over {num_episodes} episodes'
         )
         return mean_reward

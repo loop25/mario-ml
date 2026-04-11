@@ -476,7 +476,7 @@ def _run_decision_transformer(args, registry, game_adapter):
         print('Checkpoint loaded.\n')
 
     if args.eval:
-        # Evaluation: roll out in the selected game
+        # Evaluation: roll out in the selected game with live visualization
         print(f'Evaluating DT on {game_adapter.name}...')
         from src.environment.universal_env import create_env_from_adapter
         eval_env = create_env_from_adapter(game_adapter, **parse_game_opts(args.game_opts))
@@ -497,11 +497,20 @@ def _run_decision_transformer(args, registry, game_adapter):
             env=eval_env,
             game_token_id=token_config.game_token_id,
             target_return=target_return,
-            num_episodes=config.get('eval_episodes', 5),
+            num_episodes=config.get('eval_episodes', 10),
             max_steps=config.get('eval_max_steps', 1000),
+            visualizer=dashboard,
         )
         eval_env.close()
-        print(f'\nMean reward: {mean_reward:.1f}')
+
+        print(f'\n{"="*60}')
+        print(f'  DT Evaluation Results on {game_adapter.name}')
+        print(f'  Mean reward: {mean_reward:.1f}')
+        if mean_reward > 0:
+            print(f'  Verdict: The DT is learning! Positive average reward.')
+        else:
+            print(f'  Verdict: Needs more training data or training steps.')
+        print(f'{"="*60}')
     else:
         # Training — auto-collect if experience store needs more data
         min_episodes = config.get('min_episodes_to_train', 50)
