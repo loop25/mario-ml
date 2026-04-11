@@ -38,6 +38,12 @@ recordings/
 Thumbs.db
 desktop.ini
 
+# User settings (launcher preferences, per-machine)
+config/launcher_settings.json
+
 # Temporary files
 *.tmp
 *.bak
+
+# Test output
+test_output.txt

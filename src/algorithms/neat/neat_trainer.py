@@ -149,6 +149,9 @@ class NEATTrainer(BaseTrainer):
         print(f'Evaluation mode: {mode} ({self.num_envs} envs)')
         print(f'{"="*60}\n')
 
+        # Publish training start event (achievements, milestones, etc.)
+        self.publish_training_start()
+
         # Choose evaluation function based on parallel mode
         eval_fn = (
             self._eval_genomes_parallel if self.num_envs > 1
@@ -166,6 +169,10 @@ class NEATTrainer(BaseTrainer):
 
         # Training complete — save final model
         self.is_training = False
+
+        # Publish training end event (achievements, milestones, etc.)
+        self.publish_training_end(self.generation)
+
         best_fitness = self.best_genome.fitness if self.best_genome else 0
         print(f'\n{"="*60}')
         print(f'NEAT Training Complete!')
@@ -235,8 +242,16 @@ class NEATTrainer(BaseTrainer):
             if reward > self.best_reward:
                 self.best_reward = reward
                 self.best_genome = genome
+                self.publish_new_best(reward)
             if distance > self.best_distance:
                 self.best_distance = distance
+
+            # Publish event bus episode_complete (achievements, milestones, etc.)
+            self.publish_episode_complete(reward, {
+                'generation': self.generation,
+                'distance': distance,
+                'stage_completed': completed,
+            })
 
             # Notify curriculum / episode callbacks
             self._fire_episode_complete(
@@ -272,6 +287,17 @@ class NEATTrainer(BaseTrainer):
         complexity = (
             len(best_gen_genome.nodes) + len(best_gen_genome.connections)
         )
+
+        # Render NEAT network topology for the best genome
+        try:
+            from src.visualization.neat_visualizer import NeatVisualizer
+            if not hasattr(self, '_neat_viz'):
+                self._neat_viz = NeatVisualizer(width=300, height=250)
+            viz_img = self._neat_viz.render_genome(best_gen_genome, self.neat_config)
+            # Store for dashboard to pick up
+            self._latest_network_viz = viz_img
+        except Exception:
+            pass
 
         # Print generation summary
         completion_str = f', Completions={gen_completions}' if gen_completions > 0 else ''
@@ -377,8 +403,16 @@ class NEATTrainer(BaseTrainer):
                 self.best_reward = result.fitness
                 self.best_genome = genome
                 best_frame = result.last_frame
+                self.publish_new_best(result.fitness)
             if result.distance > self.best_distance:
                 self.best_distance = result.distance
+
+            # Publish event bus episode_complete (achievements, milestones, etc.)
+            self.publish_episode_complete(result.fitness, {
+                'generation': self.generation,
+                'distance': result.distance,
+                'stage_completed': result.stage_completed,
+            })
 
             # Notify episode callbacks (curriculum learning, etc.)
             self._fire_episode_complete(
@@ -401,6 +435,17 @@ class NEATTrainer(BaseTrainer):
         complexity = (
             len(best_gen_genome.nodes) + len(best_gen_genome.connections)
         )
+
+        # Render NEAT network topology for the best genome
+        try:
+            from src.visualization.neat_visualizer import NeatVisualizer
+            if not hasattr(self, '_neat_viz'):
+                self._neat_viz = NeatVisualizer(width=300, height=250)
+            viz_img = self._neat_viz.render_genome(best_gen_genome, self.neat_config)
+            # Store for dashboard to pick up
+            self._latest_network_viz = viz_img
+        except Exception:
+            pass
 
         completion_str = f', Completions={gen_completions}' if gen_completions > 0 else ''
         print(f'  Gen {self.generation}: '

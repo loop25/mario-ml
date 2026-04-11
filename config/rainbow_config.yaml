@@ -1,0 +1,113 @@
+# ============================================================================
+# Rainbow DQN Configuration
+# ============================================================================
+# Rainbow combines six orthogonal improvements to DQN into one agent:
+#   1. Double DQN — reduces Q-value overestimation
+#   2. Prioritized Experience Replay — samples surprising transitions more
+#   3. Dueling Networks — separates state-value and advantage estimation
+#   4. Noisy Networks — learned exploration (replaces epsilon-greedy)
+#   5. Distributional RL (C51) — learns return distributions, not scalars
+#   6. Multi-step Returns — uses n-step bootstrapping for faster credit
+#
+# Each improvement can be toggled independently for ablation studies.
+# With all enabled, Rainbow significantly outperforms vanilla DQN.
+#
+# Reference: Hessel et al., 2018 — "Rainbow: Combining Improvements in DRL"
+# ============================================================================
+
+# --- Core Hyperparameters ---
+# Lower learning rate than vanilla DQN (1e-4) for stability with
+# all improvements active. Adam epsilon set higher per the paper.
+learning_rate: 6.25e-5
+adam_epsilon: 1.5e-4
+
+# Discount factor for future rewards.
+gamma: 0.99
+
+# --- Feature Toggles ---
+# Enable/disable each Rainbow improvement independently.
+# Set all to false to get vanilla DQN behavior.
+use_double_dqn: true         # Use online net for action selection in targets
+use_prioritized_replay: true # Priority-weighted sampling via SumTree
+use_dueling: true            # Separate V(s) and A(s,a) streams
+use_noisy: true              # NoisyLinear layers (disables epsilon-greedy)
+use_distributional: true     # C51 with 51 atoms over [v_min, v_max]
+use_multistep: true          # N-step returns with deque accumulation
+
+# --- Experience Replay ---
+# Buffer stores experiences as uint8 for memory efficiency.
+# 100K experiences ≈ 2.8 GB for 84x84x4 observations.
+buffer_size: 100000
+batch_size: 32
+
+# Wait this many steps before starting training.
+# Fills buffer with diverse initial experiences.
+learning_starts: 10000
+
+# --- Prioritized Replay Parameters ---
+# alpha: How much prioritization to use.
+#   0.0 = uniform sampling (no prioritization)
+#   1.0 = full prioritization (only high TD-error sampled)
+per_alpha: 0.6
+
+# beta: Importance sampling correction strength.
+#   Annealed from beta_start to beta_end over beta_frames steps.
+#   At 1.0, fully corrects for the non-uniform sampling bias.
+per_beta_start: 0.4
+per_beta_end: 1.0
+per_beta_frames: 100000
+
+# --- Distributional RL (C51) ---
+# The network outputs a probability distribution over num_atoms
+# fixed support points spanning [v_min, v_max].
+# 51 atoms give a good resolution of 0.4 per atom with default range.
+num_atoms: 51
+v_min: -10.0
+v_max: 10.0
+
+# --- Multi-step Returns ---
+# n_step: Number of steps for return computation.
+#   R = r_0 + gamma * r_1 + gamma^2 * r_2 (for n=3)
+#   Higher n = faster credit assignment but more variance.
+n_step: 3
+
+# --- Noisy Networks ---
+# sigma_init: Initial noise scale for NoisyLinear layers.
+#   Higher = more initial exploration.
+#   The network learns to adjust sigma during training.
+sigma_init: 0.5
+
+# --- Epsilon-greedy (only used when use_noisy is false) ---
+epsilon_start: 1.0
+epsilon_end: 0.01
+epsilon_decay: 0.995
+
+# --- Target Network ---
+# Copy online network weights to target network every N steps.
+target_update_freq: 1000
+
+# --- Training Settings ---
+num_episodes: 5000
+max_steps_per_episode: 5000
+
+# Save checkpoint every N episodes.
+save_freq: 100
+
+# Evaluate model every N episodes.
+eval_freq: 50
+
+# Number of evaluation episodes.
+eval_episodes: 5
+
+# --- Environment Settings ---
+frame_skip: 4
+frame_stack: 4
+downscale_size: [84, 84]
+grayscale: true
+
+# --- Visualization ---
+render_every_n_episodes: 1
+graph_update_interval: 5
+
+# --- Logging ---
+log_dir: "./logs/rainbow/"

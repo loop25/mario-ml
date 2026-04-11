@@ -1,0 +1,129 @@
+# ============================================================================
+# Decision Transformer (DT) Configuration
+# ============================================================================
+# The Decision Transformer treats reinforcement learning as a sequence
+# modeling problem. Instead of learning a value function or policy gradient,
+# it learns to predict the next action given a sequence of:
+#
+#   (return-to-go, observation, action) tuples
+#
+# Key concepts:
+#   - Return conditioning: DT is told "achieve total reward X" at inference
+#     and generates actions to reach that target. Higher targets → better play.
+#   - Offline RL: DT trains on pre-collected trajectories (no live env).
+#   - Sequence modeling: Uses a GPT-2 style causal transformer.
+#   - Multi-game: A single DT can learn from multiple games using game tokens.
+#
+# Training pipeline:
+#   1. Train individual agents (PPO/DQN/Rainbow) on each game
+#   2. Collect trajectories into a shared Experience Store
+#   3. Train the Decision Transformer on all trajectories
+#   4. Evaluate by rolling out the DT in any game environment
+#
+# Reference: Chen et al., "Decision Transformer: Reinforcement Learning
+#            via Sequence Modeling" (NeurIPS 2021)
+# ============================================================================
+
+# --- Transformer Architecture ---
+# Embedding dimension for all modality embeddings (obs, action, return, game).
+embed_dim: 256
+
+# Number of attention heads in each transformer layer.
+# embed_dim must be divisible by num_heads.
+num_heads: 4
+
+# Number of transformer layers (depth of the network).
+# More layers = more capacity but slower training.
+num_layers: 4
+
+# Dropout rate for attention and feedforward layers.
+dropout: 0.1
+
+# --- Context Window ---
+# Number of timesteps the transformer can see at once.
+# Each timestep has 3 tokens (return, obs, action), so total tokens = 3 * K.
+# Larger context = more history, but quadratic memory cost.
+context_length: 20
+
+# Maximum timestep index (for positional embeddings).
+# Should be >= longest possible episode across all games.
+max_timestep: 5000
+
+# --- Observation Encoding ---
+# Number of input channels for the CNN observation encoder.
+# 1 = grayscale (standard), 3 = RGB.
+obs_channels: 1
+
+# --- Action Space ---
+# Maximum action vocabulary size across all games.
+# Must be >= the largest action space of any supported game.
+# Mario=7, Snake=4, Connect4=7, TicTacToe=9, Checkers=~100, Chess=~4672
+# Set conservatively high; unused action indices are never predicted.
+max_action_vocab: 64
+
+# --- Game Tokens ---
+# Maximum number of distinct game identifiers.
+# Each game gets a unique integer token for conditioning.
+max_game_tokens: 1024
+
+# --- Training ---
+# Total number of gradient update steps.
+total_train_steps: 100000
+
+# Batch size (number of context windows per gradient step).
+batch_size: 32
+
+# Learning rate for AdamW optimizer.
+learning_rate: 1.0e-4
+
+# Weight decay for AdamW (regularization).
+weight_decay: 1.0e-4
+
+# Linear warmup steps for the learning rate.
+warmup_steps: 1000
+
+# Maximum gradient norm for clipping (prevents exploding gradients).
+max_grad_norm: 1.0
+
+# --- Experience Store ---
+# Maximum number of trajectories to keep in the store.
+# When full, lowest-return trajectories are evicted.
+store_capacity: 50000
+
+# Minimum return percentile for training data.
+# 0.0 = use all data, 0.5 = only top 50% of trajectories.
+# Higher values mean the DT only sees "good" trajectories.
+min_return_pct: 0.0
+
+# --- Experience Collection ---
+# Number of episodes to collect per game before training.
+collect_episodes_per_game: 100
+
+# Minimum episodes required before DT training can begin.
+min_episodes_to_train: 50
+
+# --- Evaluation ---
+# Number of episodes per evaluation run.
+eval_episodes: 5
+
+# Maximum steps per evaluation episode.
+eval_max_steps: 1000
+
+# Target return multiplier for evaluation.
+# DT is conditioned on (max_observed_return * this multiplier).
+# >1.0 asks the DT to aim higher than anything it's seen.
+eval_target_return_multiplier: 1.0
+
+# --- Logging & Checkpoints ---
+# Log training metrics every N gradient steps.
+log_interval: 100
+
+# Save model checkpoint every N gradient steps.
+save_interval: 5000
+
+# --- Directory ---
+# Where to save DT model checkpoints and metadata.
+save_dir: "models/generalist"
+
+# Where to store collected trajectories on disk.
+store_dir: "experience_store"

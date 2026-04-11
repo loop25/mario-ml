@@ -35,6 +35,8 @@ import torch.optim as optim
 from typing import Dict, Any, Optional
 
 from src.algorithms.base_trainer import BaseTrainer
+from src.algorithms.device import select_device
+from src.algorithms.frame_utils import capture_display_frame
 from src.algorithms.dqn.dqn_network import DQNNetwork
 from src.algorithms.dqn.replay_buffer import ReplayBuffer
 from src.visualization.dashboard import Dashboard
@@ -77,17 +79,20 @@ class DQNTrainer(BaseTrainer):
         num_envs: int = 1,
         world: int = 1,
         stage: int = 1,
+        device_preference: Optional[str] = None,
+        env_factory=None,
     ):
         super().__init__(env, config, visualizer, save_dir, log_dir)
 
         self.num_envs = num_envs
         self.world = world
         self.stage = stage
+        self._env_factory = env_factory
 
-        # Device selection: Use GPU if available AND functional.
-        # Some GPUs (e.g. RTX 5070 Blackwell/sm_120) report CUDA as
-        # available but fail on actual kernel execution with cu124.
-        self.device = self._select_device()
+        # Centralized device selection with auto-detection
+        self.device = select_device(
+            preference=device_preference, algo_name='DQN'
+        )
 
         # Get environment dimensions
         obs_shape = env.observation_space.shape  # (84, 84, 4)
@@ -154,54 +159,24 @@ class DQNTrainer(BaseTrainer):
         # ================================================================
         self.extra_envs = []
         if num_envs > 1:
-            from src.environment.mario_env import create_cnn_env
             # Pump pygame events between env creations so Windows
             # doesn't flag the window as "Not Responding" during setup.
-            try:
-                import pygame
-                _pump = pygame.event.pump
-            except (ImportError, Exception):
-                _pump = lambda: None
+            def _safe_pump():
+                try:
+                    import pygame
+                    if pygame.get_init() and pygame.display.get_init():
+                        pygame.event.pump()
+                except Exception:
+                    pass
             for i in range(num_envs - 1):
-                extra_env = create_cnn_env(world=world, stage=stage)
+                if self._env_factory:
+                    extra_env = self._env_factory()
+                else:
+                    from src.environment.mario_env import create_cnn_env
+                    extra_env = create_cnn_env(world=world, stage=stage)
                 self.extra_envs.append(extra_env)
-                _pump()  # Keep window responsive
+                _safe_pump()  # Keep window responsive
             print(f'  DQN: Created {num_envs} environments (round-robin, shared replay buffer)')
-
-    @staticmethod
-    def _select_device() -> torch.device:
-        """Select CUDA if available and functional, otherwise CPU.
-
-        Some GPUs (e.g. RTX 5070 Blackwell/sm_120) report
-        ``torch.cuda.is_available() == True`` but crash on actual
-        kernel execution with older CUDA toolkit versions.  We run a
-        quick smoke-test to catch that and fall back to CPU.
-
-        Fix: Install PyTorch nightly with CUDA 12.8+:
-            pip install --pre torch torchvision torchaudio --index-url https://download.pytorch.org/whl/nightly/cu128
-        """
-        if not torch.cuda.is_available():
-            print('DQN using device: cpu')
-            print('  Tip: Install CUDA-enabled PyTorch for GPU acceleration:')
-            print('  pip install torch torchvision '
-                  '--index-url https://download.pytorch.org/whl/cu128')
-            return torch.device('cpu')
-        try:
-            a = torch.randn(4, 4, device='cuda')
-            _ = a @ a.T
-            del a
-            torch.cuda.empty_cache()
-            gpu = torch.cuda.get_device_name(0)
-            vram = torch.cuda.get_device_properties(0).total_mem
-            vram_gb = round(vram / 1024**3, 1)
-            print(f'DQN using device: cuda ({gpu}, {vram_gb}GB VRAM)')
-            return torch.device('cuda')
-        except RuntimeError:
-            print('DQN using device: cpu (CUDA kernels not supported on this GPU)')
-            print('  Tip: Install CUDA-enabled PyTorch for GPU acceleration:')
-            print('  pip install torch torchvision '
-                  '--index-url https://download.pytorch.org/whl/cu128')
-            return torch.device('cpu')
 
     def _preprocess_observation(self, obs: np.ndarray) -> np.ndarray:
         """
@@ -349,6 +324,9 @@ class DQNTrainer(BaseTrainer):
         print(f'Learning starts after: {self.learning_starts:,} steps')
         print(f'{"="*60}\n')
 
+        # Publish training start event (achievements, milestones, etc.)
+        self.publish_training_start()
+
         for episode in range(1, num_episodes + 1):
             # Stop if dashboard was closed
             if self._dashboard_closed:
@@ -382,6 +360,9 @@ class DQNTrainer(BaseTrainer):
                 next_obs, reward, done, info = self.env.step(action)
                 next_obs_processed = self._preprocess_observation(next_obs)
 
+                # Record for DT trajectory collection
+                self._dt_record_step(next_obs, action, reward)
+
                 # Store experience in replay buffer
                 self.replay_buffer.push(
                     state=obs,
@@ -404,15 +385,12 @@ class DQNTrainer(BaseTrainer):
 
                 # Track metrics
                 episode_reward += reward
-                x_pos = info.get('x_pos', 0)
+                x_pos = info.get('x_pos', info.get('score', 0))
                 max_distance = max(max_distance, x_pos)
                 obs = next_obs_processed
 
-                # Capture the raw NES frame (240x256 RGB) for visualization
-                try:
-                    last_frame = self.env.unwrapped.screen
-                except AttributeError:
-                    last_frame = next_obs
+                # Capture display-quality frame for visualization
+                last_frame = capture_display_frame(self.env, fallback_obs=next_obs)
 
                 # Show live gameplay every 4 steps
                 if self.visualizer and step % 4 == 0:
@@ -421,6 +399,9 @@ class DQNTrainer(BaseTrainer):
 
                 if done:
                     break
+
+            # Save episode for DT training
+            self._dt_finalize_episode()
 
             # Decay epsilon after each episode
             self.epsilon = max(
@@ -431,8 +412,15 @@ class DQNTrainer(BaseTrainer):
             # Update best tracking
             if episode_reward > self.best_reward:
                 self.best_reward = episode_reward
+                self.publish_new_best(episode_reward)
             if max_distance > self.best_distance:
                 self.best_distance = max_distance
+
+            # Publish event bus episode_complete (achievements, milestones, etc.)
+            self.publish_episode_complete(episode_reward, {
+                'distance': max_distance,
+                'stage_completed': info.get('stage_completed', False),
+            })
 
             # Notify episode callbacks (curriculum learning, etc.)
             stage_completed = info.get('stage_completed', False)
@@ -441,6 +429,12 @@ class DQNTrainer(BaseTrainer):
                 distance=max_distance,
                 completed=stage_completed,
             )
+
+            # Check mastery — auto-stop when game is mastered
+            if self.check_mastery(info):
+                print('  Auto-stopping: game mastered!')
+                self._save_on_exit()
+                break
 
             # Average loss for this episode
             avg_loss = episode_loss / max(loss_count, 1)
@@ -484,6 +478,10 @@ class DQNTrainer(BaseTrainer):
 
         # Training complete
         self.is_training = False
+
+        # Publish training end event (achievements, milestones, etc.)
+        self.publish_training_end(self.episode_count)
+
         print(f'\n{"="*60}')
         print(f'DQN Training Complete!')
         print(f'Episodes: {self.episode_count}')
@@ -516,6 +514,9 @@ class DQNTrainer(BaseTrainer):
         print(f'Buffer size: {self.config.get("buffer_size", 100000):,}')
         print(f'Learning starts after: {self.learning_starts:,} steps')
         print(f'{"="*60}\n')
+
+        # Publish training start event (achievements, milestones, etc.)
+        self.publish_training_start()
 
         # Per-env state tracking
         env_obs = [None] * n
@@ -559,6 +560,10 @@ class DQNTrainer(BaseTrainer):
                 next_obs, reward, done, info = env.step(action)
                 next_obs_processed = self._preprocess_observation(next_obs)
 
+                # Record for DT trajectory collection (env 0 only)
+                if env_idx == 0:
+                    self._dt_record_step(next_obs, action, reward)
+
                 # Store in shared replay buffer
                 self.replay_buffer.push(
                     state=obs,
@@ -581,16 +586,13 @@ class DQNTrainer(BaseTrainer):
 
                 # Track metrics
                 env_rewards[env_idx] += reward
-                x_pos = info.get('x_pos', 0)
+                x_pos = info.get('x_pos', info.get('score', 0))
                 env_distances[env_idx] = max(env_distances[env_idx], x_pos)
                 env_obs[env_idx] = next_obs_processed
                 env_steps[env_idx] += 1
 
                 # Capture frame
-                try:
-                    env_frames[env_idx] = env.unwrapped.screen
-                except AttributeError:
-                    env_frames[env_idx] = next_obs
+                env_frames[env_idx] = capture_display_frame(env, fallback_obs=next_obs)
 
                 # Check max steps
                 if env_steps[env_idx] >= self.max_steps:
@@ -603,6 +605,10 @@ class DQNTrainer(BaseTrainer):
                     ep_reward = env_rewards[env_idx]
                     ep_dist = env_distances[env_idx]
 
+                    # Finalize DT trajectory (env 0 only)
+                    if env_idx == 0:
+                        self._dt_finalize_episode()
+
                     # Decay epsilon
                     self.epsilon = max(
                         self.epsilon_end,
@@ -612,8 +618,15 @@ class DQNTrainer(BaseTrainer):
                     # Track best
                     if ep_reward > self.best_reward:
                         self.best_reward = ep_reward
+                        self.publish_new_best(ep_reward)
                     if ep_dist > self.best_distance:
                         self.best_distance = ep_dist
+
+                    # Publish event bus episode_complete (achievements, milestones, etc.)
+                    self.publish_episode_complete(ep_reward, {
+                        'distance': ep_dist,
+                        'stage_completed': info.get('stage_completed', False),
+                    })
 
                     # Stage completion
                     if info.get('stage_completed', False):
@@ -671,6 +684,10 @@ class DQNTrainer(BaseTrainer):
                 pass
 
         self.is_training = False
+
+        # Publish training end event (achievements, milestones, etc.)
+        self.publish_training_end(self.episode_count)
+
         print(f'\n{"="*60}')
         print(f'DQN Training Complete!')
         print(f'Episodes: {self.episode_count}')
@@ -790,7 +807,7 @@ class DQNTrainer(BaseTrainer):
         if not os.path.exists(path):
             raise FileNotFoundError(f'Checkpoint not found: {path}')
 
-        checkpoint = torch.load(path, map_location=self.device)
+        checkpoint = torch.load(path, map_location=self.device, weights_only=False)
 
         self.policy_net.load_state_dict(checkpoint['policy_net'])
         self.target_net.load_state_dict(checkpoint['target_net'])

@@ -4,10 +4,12 @@ Live streaming manager via ffmpeg RTMP.
 Sends raw video frames and audio to Twitch and/or YouTube simultaneously
 using ffmpeg's tee muxer. Requires ffmpeg installed and on PATH.
 """
+import atexit
 import os
 import re
 import shutil
 import subprocess
+import tempfile
 import threading
 import time
 from typing import Optional
@@ -41,6 +43,7 @@ class StreamManager:
         fps: int = 30,
         video_bitrate: str = '4500k',
         audio_file: Optional[str] = None,
+        audio_files: Optional[list] = None,
     ):
         self.twitch_key = twitch_key
         self.youtube_key = youtube_key
@@ -48,7 +51,16 @@ class StreamManager:
         self.height = height
         self.fps = fps
         self.video_bitrate = video_bitrate
-        self.audio_file = audio_file
+        # Support single file or playlist
+        if audio_files:
+            self.audio_files = [f for f in audio_files if os.path.isfile(f)]
+        elif audio_file and os.path.isfile(audio_file):
+            self.audio_files = [audio_file]
+        else:
+            self.audio_files = []
+        # For backward compat
+        self.audio_file = self.audio_files[0] if self.audio_files else None
+        self._concat_file: Optional[str] = None
 
         self._process: Optional[subprocess.Popen] = None
         self._health_thread: Optional[threading.Thread] = None
@@ -56,12 +68,29 @@ class StreamManager:
         self.error_message: Optional[str] = None
         self._frame_count = 0
         self._start_time = 0.0
+        self._reconnect_attempts = 0
+        self._max_reconnect_attempts = 20  # Allow many reconnects for long streams
+        self._reconnect_delay = 5  # seconds
+        self._auto_reconnect = True
+        self._last_frame: Optional[np.ndarray] = None
+
+        # Frame pump: a background thread that sends the last frame to
+        # ffmpeg at a steady fps regardless of how fast the dashboard
+        # produces new frames. This prevents bitrate drops when training
+        # computation causes gaps in frame delivery.
+        self._frame_pump_thread: Optional[threading.Thread] = None
+        self._frame_pump_running = False
+        self._frame_lock = threading.Lock()
 
     def _build_ffmpeg_command(self) -> list:
         cmd = ['ffmpeg', '-y']
 
-        # Video input: raw RGB frames from pipe
+        # Video input: raw RGB frames from pipe.
+        # The frame pump thread delivers frames at a steady fps, so we
+        # do NOT use -use_wallclock_as_timestamps (that caused bitrate
+        # collapse when frames arrived slowly).
         cmd += [
+            '-thread_queue_size', '1024',
             '-f', 'rawvideo',
             '-pixel_format', 'rgb24',
             '-video_size', f'{self.width}x{self.height}',
@@ -69,39 +98,62 @@ class StreamManager:
             '-i', 'pipe:0',
         ]
 
-        # Audio input
-        if self.audio_file and os.path.isfile(self.audio_file):
-            cmd += ['-stream_loop', '-1', '-i', self.audio_file]
+        # Audio input — use concat demuxer for playlists, single loop
+        # for one file, or silent generator if no audio files at all.
+        if len(self.audio_files) > 1:
+            # Build a temporary concat playlist file for ffmpeg
+            self._concat_file = self._create_concat_file()
+            cmd += ['-thread_queue_size', '512',
+                    '-f', 'concat', '-safe', '0',
+                    '-stream_loop', '-1', '-i', self._concat_file]
+        elif self.audio_file and os.path.isfile(self.audio_file):
+            cmd += ['-thread_queue_size', '512',
+                    '-stream_loop', '-1', '-i', self.audio_file]
         else:
-            cmd += ['-f', 'lavfi', '-i', 'anullsrc=channel_layout=stereo:sample_rate=44100']
+            cmd += ['-f', 'lavfi', '-i',
+                    'anullsrc=channel_layout=stereo:sample_rate=44100']
 
-        # Video encoding
+        # Video encoding — optimized for game/pixel art streaming.
+        # 'faster' preset gives much better quality than 'veryfast' for
+        # crisp game pixels, at only ~15% more CPU. 'zerolatency' keeps
+        # latency low for live streaming. CBR mode (maxrate=bitrate)
+        # prevents YouTube/Twitch bitrate warnings.
         cmd += [
             '-c:v', 'libx264',
-            '-preset', 'veryfast',
+            '-preset', 'faster',
             '-tune', 'zerolatency',
             '-b:v', self.video_bitrate,
             '-maxrate', self.video_bitrate,
             '-bufsize', self._calc_bufsize(self.video_bitrate),
             '-pix_fmt', 'yuv420p',
             '-g', str(self.fps * 2),
+            '-vsync', 'cfr',
+            '-x264-params', 'nal-hrd=cbr',  # Force CBR for stable bitrate
         ]
 
-        # Audio encoding
-        cmd += ['-c:a', 'aac', '-b:a', '128k', '-ar', '44100']
-        cmd += ['-shortest']
+        # Audio encoding — do NOT use -shortest (it kills the stream
+        # when audio buffer fills up faster than video frames arrive)
+        cmd += ['-c:a', 'aac', '-b:a', '192k', '-ar', '44100']
 
         # Build output destinations
-        destinations = []
-        if self.twitch_key:
-            destinations.append(f'[f=flv]{self.TWITCH_RTMP}/{self.twitch_key}')
-        if self.youtube_key:
-            destinations.append(f'[f=flv]{self.YOUTUBE_RTMP}/{self.youtube_key}')
+        # When streaming to a single destination, use plain flv output.
+        # When streaming to multiple, use ffmpeg's tee muxer.
+        # On Windows the tee muxer's pipe-separated URL string must be
+        # carefully constructed — each destination is [f=flv]<url> and
+        # they're joined with '|'.  If that still fails (common on
+        # Windows due to shell escaping), fall back to running separate
+        # ffmpeg output args instead of tee.
+        twitch_url = f'{self.TWITCH_RTMP}/{self.twitch_key}' if self.twitch_key else None
+        youtube_url = f'{self.YOUTUBE_RTMP}/{self.youtube_key}' if self.youtube_key else None
 
-        if len(destinations) == 1:
-            cmd += ['-f', 'flv', destinations[0].split(']')[1]]
-        else:
-            cmd += ['-f', 'tee', '|'.join(destinations)]
+        urls = [u for u in [twitch_url, youtube_url] if u]
+
+        if len(urls) == 1:
+            cmd += ['-f', 'flv', urls[0]]
+        elif len(urls) == 2:
+            # Use two separate -f flv outputs instead of tee muxer —
+            # tee muxer has known issues with pipe chars on Windows.
+            cmd += ['-f', 'flv', urls[0], '-f', 'flv', urls[1]]
 
         return cmd
 
@@ -133,6 +185,37 @@ class StreamManager:
         else:
             value_k = int(value)
         return f'{value_k * 2}k'
+
+    def _create_concat_file(self) -> str:
+        """Create a temporary ffmpeg concat playlist file.
+
+        ffmpeg's concat demuxer reads a text file listing audio files:
+            file '/path/to/track1.mp3'
+            file '/path/to/track2.ogg'
+
+        Combined with -stream_loop -1, the entire playlist repeats
+        infinitely — giving the stream continuous shuffled music.
+
+        Returns:
+            Path to the temporary concat playlist file.
+        """
+        fd, path = tempfile.mkstemp(suffix='.txt', prefix='stream_audio_')
+        with os.fdopen(fd, 'w', encoding='utf-8') as f:
+            for audio_path in self.audio_files:
+                # ffmpeg concat requires forward slashes and single-quote
+                # escaping — on Windows, backslashes must be replaced.
+                safe_path = audio_path.replace('\\', '/')
+                f.write(f"file '{safe_path}'\n")
+        return path
+
+    def _cleanup_concat_file(self) -> None:
+        """Remove the temporary concat playlist file if it exists."""
+        if self._concat_file and os.path.isfile(self._concat_file):
+            try:
+                os.remove(self._concat_file)
+            except OSError:
+                pass
+            self._concat_file = None
 
     def start(self) -> bool:
         if self.is_streaming:
@@ -171,6 +254,15 @@ class StreamManager:
         self._health_thread = threading.Thread(target=self._monitor_health, daemon=True)
         self._health_thread.start()
 
+        # Start frame pump — sends last frame at steady fps to ffmpeg
+        self._frame_pump_running = True
+        self._frame_pump_thread = threading.Thread(target=self._frame_pump_loop, daemon=True)
+        self._frame_pump_thread.start()
+
+        # Register atexit handler so ffmpeg is killed even if the Python
+        # process is terminated abruptly (e.g. launcher force-kill).
+        atexit.register(self._atexit_cleanup)
+
         destinations = []
         if self.twitch_key:
             destinations.append('Twitch')
@@ -180,36 +272,153 @@ class StreamManager:
         return True
 
     def stop(self) -> None:
-        if not self.is_streaming:
+        if not self.is_streaming and self._process is None:
             return
         self.is_streaming = False
-        if self._process:
-            try:
-                self._process.stdin.close()
-            except (BrokenPipeError, OSError):
-                pass
-            try:
-                self._process.wait(timeout=2)
-            except subprocess.TimeoutExpired:
-                self._process.kill()
-            self._process = None
+        self._frame_pump_running = False
+        self._kill_ffmpeg()
+        self._cleanup_concat_file()
 
         elapsed = time.time() - self._start_time
         print(f'[Stream] Stopped after {elapsed:.0f}s, {self._frame_count} frames sent')
 
+    def _kill_ffmpeg(self) -> None:
+        """Terminate the ffmpeg subprocess, with escalation."""
+        proc = self._process
+        if proc is None:
+            return
+        self._process = None
+
+        # Close stdin to signal ffmpeg to flush and exit
+        try:
+            proc.stdin.close()
+        except (BrokenPipeError, OSError):
+            pass
+
+        # Give ffmpeg a moment to exit gracefully
+        try:
+            proc.wait(timeout=2)
+        except subprocess.TimeoutExpired:
+            # Escalate: terminate, then kill
+            try:
+                proc.terminate()
+                proc.wait(timeout=1)
+            except (subprocess.TimeoutExpired, OSError):
+                try:
+                    proc.kill()
+                except OSError:
+                    pass
+
+    def _atexit_cleanup(self) -> None:
+        """Last-resort cleanup registered via atexit.
+
+        If the Python process is terminating and ffmpeg is still running,
+        kill it immediately so it doesn't become an orphan process that
+        keeps streaming silence/frozen frames forever.
+        """
+        if self._process is not None:
+            try:
+                self._process.kill()
+            except OSError:
+                pass
+            self._process = None
+            self.is_streaming = False
+        self._cleanup_concat_file()
+
     def send_frame(self, frame: np.ndarray) -> None:
-        if not self.is_streaming or self._process is None:
+        """Update the frame that the pump thread sends to ffmpeg.
+
+        This does NOT write to ffmpeg directly — the frame pump thread
+        handles that at a steady fps. This just updates the latest frame
+        so the pump always has fresh content to send.
+        """
+        if frame is None:
             return
         try:
             if frame.shape[0] != self.height or frame.shape[1] != self.width:
                 import cv2
                 frame = cv2.resize(frame, (self.width, self.height))
-            self._process.stdin.write(frame.tobytes())
-            self._frame_count += 1
-        except (BrokenPipeError, OSError):
-            self.is_streaming = False
-            self.error_message = 'Stream connection lost'
-            print(f'[Stream] ERROR: {self.error_message}')
+            with self._frame_lock:
+                self._last_frame = frame
+        except Exception:
+            pass
+
+    def _frame_pump_loop(self) -> None:
+        """Background thread: sends frames to ffmpeg at a steady fps.
+
+        Even when the dashboard only updates at 5fps during heavy training,
+        this thread keeps sending the last frame at 30fps so ffmpeg always
+        has data to encode and the bitrate stays stable.
+        """
+        interval = 1.0 / self.fps
+        # Create a black frame as initial placeholder
+        blank = np.zeros((self.height, self.width, 3), dtype=np.uint8)
+
+        while self._frame_pump_running:
+            t0 = time.time()
+
+            if self._process is None or not self.is_streaming:
+                time.sleep(0.1)
+                continue
+
+            # Get the latest frame (or blank if none yet)
+            with self._frame_lock:
+                frame = self._last_frame if self._last_frame is not None else blank
+
+            try:
+                self._process.stdin.write(frame.tobytes())
+                self._frame_count += 1
+                self._reconnect_attempts = 0
+            except (BrokenPipeError, OSError):
+                self.is_streaming = False
+                self.error_message = 'Stream connection lost'
+                print(f'[Stream] WARNING: Connection lost, will auto-reconnect...')
+                self._try_reconnect()
+                continue
+
+            # Sleep to maintain target fps
+            elapsed = time.time() - t0
+            sleep_time = interval - elapsed
+            if sleep_time > 0:
+                time.sleep(sleep_time)
+
+    def _try_reconnect(self) -> None:
+        """Attempt to reconnect the stream after a dropped connection."""
+        if self._reconnect_attempts >= self._max_reconnect_attempts:
+            print(f'[Stream] ERROR: Failed to reconnect after '
+                  f'{self._max_reconnect_attempts} attempts. Stream stopped.')
+            self._auto_reconnect = False
+            return
+
+        self._reconnect_attempts += 1
+        print(f'[Stream] Reconnect attempt {self._reconnect_attempts}/'
+              f'{self._max_reconnect_attempts} in {self._reconnect_delay}s...')
+
+        # Kill old process
+        self._kill_ffmpeg()
+
+        time.sleep(self._reconnect_delay)
+
+        # Restart ffmpeg
+        cmd = self._build_ffmpeg_command()
+        try:
+            self._process = subprocess.Popen(
+                cmd,
+                stdin=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                stdout=subprocess.DEVNULL,
+            )
+            self.is_streaming = True
+            self.error_message = None
+
+            # Restart health monitor
+            self._health_thread = threading.Thread(
+                target=self._monitor_health, daemon=True)
+            self._health_thread.start()
+
+            print(f'[Stream] Reconnected successfully!')
+        except OSError as e:
+            print(f'[Stream] Reconnect failed: {e}')
 
     def _monitor_health(self) -> None:
         if not self._process:
@@ -217,9 +426,20 @@ class StreamManager:
         try:
             for line in iter(self._process.stderr.readline, b''):
                 text = line.decode('utf-8', errors='replace').strip()
-                if 'error' in text.lower() or 'failed' in text.lower():
-                    self.error_message = text
-                    print(f'[Stream] WARNING: {text}')
+                if not text:
+                    continue
+                text_lower = text.lower()
+                # Ignore normal ffmpeg progress lines
+                if text.startswith('frame=') or text.startswith('size='):
+                    continue
+                if 'error' in text_lower or 'failed' in text_lower:
+                    # Distinguish fatal errors from transient warnings
+                    if 'conversion failed' in text_lower:
+                        self.error_message = 'Stream connection lost'
+                        self.is_streaming = False
+                        print(f'[Stream] ERROR: {self.error_message}')
+                    else:
+                        print(f'[Stream] WARNING: {text}')
                 if not self.is_streaming:
                     break
         except (ValueError, OSError):

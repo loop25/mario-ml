@@ -1,0 +1,28 @@
+# ============================================================================
+# A2C (Advantage Actor-Critic) Configuration
+# ============================================================================
+# A2C is a synchronous version of A3C. It collects short rollouts (n_steps)
+# and updates the policy using advantage estimation. Faster than PPO per
+# wall-clock second but less stable.
+#
+# Key difference from PPO: no clip_range (A2C doesn't clip gradients).
+# Uses same CnnPolicy backbone as PPO.
+# ============================================================================
+
+# --- Training ---
+total_timesteps: 1_000_000     # Total env steps before stopping
+n_steps: 5                     # Rollout length per update (shorter than PPO)
+learning_rate: 0.0007          # Higher than PPO default
+gamma: 0.99                    # Discount factor
+gae_lambda: 1.0                # GAE lambda (1.0 = no GAE, standard A2C)
+
+# --- Regularization ---
+ent_coef: 0.01                 # Entropy bonus (encourages exploration)
+vf_coef: 0.5                   # Value function loss coefficient
+max_grad_norm: 0.5             # Gradient clipping
+
+# --- Checkpointing ---
+save_freq: 50                  # Save checkpoint every N episodes
+
+# --- Multi-env ---
+num_envs: 4                    # Parallel environments (sync updates)

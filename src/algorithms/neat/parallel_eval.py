@@ -32,6 +32,8 @@ import neat
 from typing import List, Tuple, Optional, Dict, Any, Callable
 from dataclasses import dataclass
 
+from src.algorithms.frame_utils import capture_display_frame as _capture_frame
+
 
 @dataclass
 class GenomeResult:
@@ -98,17 +100,19 @@ class MultiEnvGenomeEvaluator:
         # Create N environments in the same process.
         # Pump pygame events between env creations so Windows doesn't
         # flag the window as "Not Responding" during setup.
-        try:
-            import pygame
-            _pump = pygame.event.pump
-        except (ImportError, Exception):
-            _pump = lambda: None
+        def _safe_pump():
+            try:
+                import pygame
+                if pygame.get_init() and pygame.display.get_init():
+                    pygame.event.pump()
+            except Exception:
+                pass
 
         self.envs = []
         for i in range(num_envs):
             env = create_neat_env(world=world, stage=stage)
             self.envs.append(env)
-            _pump()  # Keep window responsive
+            _safe_pump()  # Keep window responsive
 
         print(f'  Created {num_envs} environments for multi-env NEAT evaluation.')
 
@@ -254,11 +258,8 @@ class MultiEnvGenomeEvaluator:
 
                 if done:
                     done_flags[i] = True
-                    # Capture final frame
-                    try:
-                        last_frames[i] = env.unwrapped.screen.copy()
-                    except AttributeError:
-                        last_frames[i] = next_obs
+                    # Capture final frame (colorful RGB for dashboard)
+                    last_frames[i] = _capture_frame(env, next_obs)
 
             # --- Periodic display update ---
             # Every 15 rounds (~15 steps per env), capture frames and
@@ -268,10 +269,9 @@ class MultiEnvGenomeEvaluator:
                 # Capture current frames from all active envs
                 for i in range(chunk_size):
                     if not done_flags[i]:
-                        try:
-                            last_frames[i] = self.envs[i].unwrapped.screen.copy()
-                        except AttributeError:
-                            last_frames[i] = observations[i]
+                        last_frames[i] = _capture_frame(
+                            self.envs[i], observations[i])
+
 
                 if on_step is not None:
                     if not on_step(last_frames):
@@ -285,10 +285,7 @@ class MultiEnvGenomeEvaluator:
         # Capture final frames for any env that finished without a frame
         for i in range(chunk_size):
             if last_frames[i] is None:
-                try:
-                    last_frames[i] = self.envs[i].unwrapped.screen.copy()
-                except (AttributeError, Exception):
-                    pass
+                last_frames[i] = _capture_frame(self.envs[i])
 
         # Build results
         results = []
@@ -317,10 +314,9 @@ class MultiEnvGenomeEvaluator:
         """
         frames = {}
         for i, env in enumerate(self.envs):
-            try:
-                frames[i] = env.unwrapped.screen.copy()
-            except (AttributeError, Exception):
-                pass
+            frame = _capture_frame(env)
+            if frame is not None:
+                frames[i] = frame
         return frames
 
     def shutdown(self) -> None:

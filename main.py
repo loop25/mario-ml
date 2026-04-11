@@ -1,8 +1,8 @@
 """
-Super Mario Bros ML Training - Main Entry Point.
+ML Training Platform - Main Entry Point.
 
-Run this script to train or evaluate any of the three ML algorithms
-(NEAT, PPO, DQN) on Super Mario Bros with live visualization.
+Run this script to train or evaluate ML algorithms
+(NEAT, PPO, DQN, A2C, Rainbow) on any supported game with live visualization.
 
 Usage:
     # Train NEAT with live dashboard:
@@ -43,7 +43,9 @@ Environment:
 
 import argparse
 import os
+import random
 import sys
+import json
 import yaml
 
 # Add project root to Python path so imports work from any directory
@@ -51,13 +53,9 @@ project_root = os.path.dirname(os.path.abspath(__file__))
 if project_root not in sys.path:
     sys.path.insert(0, project_root)
 
-from src.environment.mario_env import create_mario_env, create_neat_env, create_cnn_env
-from src.visualization.dashboard import Dashboard
-from src.algorithms.neat.neat_trainer import NEATTrainer
-from src.algorithms.neat.parallel_eval import ParallelGenomeEvaluator
-from src.algorithms.ppo.ppo_trainer import PPOTrainer
-from src.algorithms.dqn.dqn_trainer import DQNTrainer
-from src.streaming.recording import Recorder
+from games.registry import GameRegistry
+from src.achievements.event_bus import EventBus
+from src.achievements.achievement_manager import AchievementManager
 
 
 def parse_args():
@@ -78,13 +76,29 @@ Examples:
         """,
     )
 
-    # Required: which algorithm to use
+    # Which algorithm to use
     parser.add_argument(
         '--algorithm', '-a',
         type=str,
-        required=True,
-        choices=['neat', 'ppo', 'dqn'],
-        help='ML algorithm to use: neat, ppo, or dqn',
+        required=False,
+        default='dqn',
+        choices=['neat', 'ppo', 'dqn', 'a2c', 'rainbow', 'dt'],
+        help='ML algorithm to use: neat, ppo, dqn, a2c, rainbow, or dt '
+             '(decision transformer — multi-game generalist agent)',
+    )
+
+    # Game selection
+    parser.add_argument(
+        '--game', '-g',
+        type=str,
+        default='mario',
+        help='Game to play. Use --list-games to see available games. Default: mario',
+    )
+
+    parser.add_argument(
+        '--list-games',
+        action='store_true',
+        help='List all available games and exit.',
     )
 
     # Training mode
@@ -185,7 +199,73 @@ Examples:
         help='Enable curriculum learning for whole-game training (all 32 stages)',
     )
 
+    # Game-specific options (key=value pairs from the launcher)
+    parser.add_argument(
+        '--game-opts',
+        nargs='*',
+        default=[],
+        help='Game-specific options as key=value pairs '
+             '(e.g., --game-opts grid_size=16 speed=10)',
+    )
+
+    # Device selection
+    parser.add_argument(
+        '--device',
+        type=str,
+        default='auto',
+        choices=['auto', 'cuda', 'mps', 'cpu'],
+        help='Compute device: auto (detect best), cuda, mps, or cpu. '
+             'Default: auto (CUDA > MPS > CPU)',
+    )
+
+    # Opponent selection (for board games)
+    parser.add_argument(
+        '--opponent',
+        type=str,
+        default='random',
+        choices=['random', 'minimax', 'model', 'human', 'auto-difficulty'],
+        help='Opponent type for board games',
+    )
+    parser.add_argument(
+        '--opponent-depth',
+        type=int,
+        default=3,
+        help='Minimax search depth',
+    )
+    parser.add_argument(
+        '--opponent-model',
+        type=str,
+        default='',
+        help='Path to model checkpoint for model opponent',
+    )
+
     return parser.parse_args()
+
+
+def parse_game_opts(raw_opts: list) -> dict:
+    """Parse --game-opts key=value pairs into a dict with type inference.
+
+    Tries int first, then float, then bool ('true'/'false'), else str.
+    """
+    result = {}
+    for item in raw_opts:
+        if '=' not in item:
+            continue
+        key, value = item.split('=', 1)
+        key = key.strip()
+        value = value.strip()
+        # Type inference
+        if value.lower() in ('true', 'false'):
+            result[key] = value.lower() == 'true'
+        else:
+            try:
+                result[key] = int(value)
+            except ValueError:
+                try:
+                    result[key] = float(value)
+                except ValueError:
+                    result[key] = value
+    return result
 
 
 def next_world_stage(world: int, stage: int):
@@ -209,9 +289,298 @@ def next_world_stage(world: int, stage: int):
         return None  # All stages complete!
 
 
+def find_resume_checkpoint(algo_name, game_id, save_dir='models'):
+    """Find the latest final checkpoint for auto-resume.
+
+    Checks models/{algo_name}/ for a metadata.json (written by
+    BaseTrainer._save_metadata) and a corresponding final checkpoint
+    file.  Only returns a match if the checkpoint was produced by
+    the same game (prevents loading e.g. a Mario model into Snake).
+
+    Old checkpoints without a game_id field are assumed to be 'mario'
+    for backwards compatibility.
+
+    Returns (checkpoint_path, metadata_dict) or (None, None).
+    """
+    algo_dir = os.path.join(save_dir, algo_name)
+    metadata_path = os.path.join(algo_dir, 'metadata.json')
+    if not os.path.isfile(metadata_path):
+        return None, None
+
+    try:
+        with open(metadata_path, 'r') as f:
+            metadata = json.load(f)
+    except (json.JSONDecodeError, OSError):
+        return None, None
+
+    # Verify the checkpoint was trained on the same game.
+    checkpoint_game = metadata.get('game_id', 'mario')
+    if checkpoint_game != game_id:
+        return None, None
+
+    # Each algorithm saves its final model with a different extension.
+    candidates = [
+        os.path.join(algo_dir, 'final.zip'),              # PPO, A2C (SB3)
+        os.path.join(algo_dir, 'final.pt'),                # DQN
+        os.path.join(algo_dir, 'final_best_genome.pkl'),   # NEAT
+    ]
+    for path in candidates:
+        if os.path.isfile(path):
+            return path, metadata
+
+    return None, None
+
+
+def _auto_collect_trajectories(registry, store, episodes_per_game, config):
+    """Auto-collect trajectories from all available games using random play.
+
+    This provides the initial training data the Decision Transformer needs.
+    Each game is played for `episodes_per_game` episodes with random actions,
+    and the resulting trajectories are saved to the experience store.
+    """
+    from src.experience.tokenizer import Tokenizer
+    from src.environment.universal_env import create_env_from_adapter
+
+    all_games = registry.list_games()
+    for adapter in all_games:
+        # Skip games that need external dependencies (ROMs, etc.)
+        if hasattr(adapter, 'is_available') and not adapter.is_available():
+            print(f'  Skipping {adapter.name} (not available)')
+            continue
+
+        token_config = adapter.get_token_config()
+        tokenizer = Tokenizer(token_config)
+        game_name = adapter.name
+
+        print(f'  Collecting from {game_name}...')
+
+        try:
+            env = create_env_from_adapter(adapter)
+        except Exception as e:
+            print(f'    Failed to create env: {e}')
+            continue
+
+        collected = 0
+        for ep in range(episodes_per_game):
+            obs_list = []
+            act_list = []
+            rew_list = []
+
+            try:
+                obs = env.reset()
+                obs_list.append(obs)
+                done = False
+                steps = 0
+                max_steps = config.get('collect_max_steps', 1000)
+
+                while not done and steps < max_steps:
+                    action = env.action_space.sample()
+                    obs, reward, done, info = env.step(action)
+                    obs_list.append(obs)
+                    act_list.append(action)
+                    rew_list.append(reward)
+                    steps += 1
+
+                if act_list:
+                    trajectory = tokenizer.tokenize_episode(
+                        observations=obs_list,
+                        actions=act_list,
+                        rewards=rew_list,
+                    )
+                    store.add_trajectory(trajectory)
+                    collected += 1
+            except Exception as e:
+                print(f'    Episode {ep} error: {e}')
+                continue
+
+        try:
+            env.close()
+        except Exception:
+            pass
+
+        print(f'    {game_name}: {collected} trajectories collected')
+
+
+def _run_decision_transformer(args, registry, game_adapter):
+    """Run the Decision Transformer pipeline (offline multi-game training).
+
+    This is a separate path from the standard single-game training loop
+    because the DT:
+      1. Trains on pre-collected trajectories, not live environments
+      2. Can learn from multiple games simultaneously
+      3. Uses gradient-step-based training, not episode-based
+
+    Pipeline: Load config → Create ExperienceStore → Train DT → Evaluate
+    """
+    import yaml
+
+    project_root = os.path.dirname(os.path.abspath(__file__))
+    config_path = os.path.join(project_root, 'config', 'dt_config.yaml')
+    with open(config_path, 'r') as f:
+        config = yaml.safe_load(f)
+
+    # Override steps from CLI if provided
+    if args.episodes:
+        config['total_train_steps'] = args.episodes * 1000
+
+    # Device preference
+    device_pref = args.device if args.device != 'auto' else None
+
+    # Initialize Experience Store
+    from src.experience.experience_store import ExperienceStore
+    store_dir = config.get('store_dir', 'experience_store')
+    store = ExperienceStore(
+        store_dir=store_dir,
+        max_trajectories=config.get('store_capacity', 50000),
+    )
+
+    print(f'\nExperience Store: {store_dir}')
+    print(f'  Trajectories: {len(store)}')
+    if len(store) > 0:
+        stats = store.get_stats()
+        print(f'  Games: {list(stats.get("games", {}).keys())}')
+        print(f'  Total timesteps: {stats.get("total_timesteps", 0):,}')
+    print()
+
+    # Dashboard (optional)
+    dashboard = None
+    if args.visualize:
+        from src.visualization.dashboard import Dashboard
+        dash_config = game_adapter.get_dashboard_config()
+        dash_config['primary_metric_name'] = 'Loss'
+        action_info = game_adapter.get_action_space_info()
+        dashboard = Dashboard(
+            algorithm='dt',
+            game_name='Decision Transformer',
+            action_labels=action_info.action_labels,
+            dashboard_config=dash_config,
+        )
+        total_steps = config.get('total_train_steps', 100000)
+        dashboard.set_training_target(total_steps)
+        print('Dashboard window opened.')
+
+    # Create DT Trainer
+    from src.algorithms.decision_transformer.dt_trainer import DTTrainer
+    trainer = DTTrainer(
+        config=config,
+        store=store,
+        visualizer=dashboard,
+        save_dir=config.get('save_dir', 'models/generalist'),
+        device_preference=device_pref,
+    )
+
+    # Load checkpoint if provided
+    if args.load:
+        print(f'Loading DT checkpoint: {args.load}')
+        trainer.load_checkpoint(args.load)
+        print('Checkpoint loaded.\n')
+
+    if args.eval:
+        # Evaluation: roll out in the selected game with live visualization
+        print(f'Evaluating DT on {game_adapter.name}...')
+        from src.environment.universal_env import create_env_from_adapter
+        eval_env = create_env_from_adapter(game_adapter, **parse_game_opts(args.game_opts))
+        token_config = game_adapter.get_token_config()
+        target_return = config.get('eval_target_return_multiplier', 1.0)
+        # Scale by observed max return if available
+        if len(store) > 0:
+            stats = store.get_stats()
+            game_stats = stats.get('games', {}).get(
+                str(token_config.game_token_id), {}
+            )
+            max_ret = game_stats.get('max_return', 100.0)
+            target_return *= max_ret
+        else:
+            target_return *= 100.0  # Default target
+
+        mean_reward = trainer.evaluate_on_game(
+            env=eval_env,
+            game_token_id=token_config.game_token_id,
+            target_return=target_return,
+            num_episodes=config.get('eval_episodes', 10),
+            max_steps=config.get('eval_max_steps', 1000),
+            visualizer=dashboard,
+        )
+        eval_env.close()
+
+        print(f'\n{"="*60}')
+        print(f'  DT Evaluation Results on {game_adapter.name}')
+        print(f'  Mean reward: {mean_reward:.1f}')
+        if mean_reward > 0:
+            print(f'  Verdict: The DT is learning! Positive average reward.')
+        else:
+            print(f'  Verdict: Needs more training data or training steps.')
+        print(f'{"="*60}')
+    else:
+        # Training — auto-collect if experience store needs more data
+        min_episodes = config.get('min_episodes_to_train', 50)
+        collect_per_game = config.get('collect_episodes_per_game', 100)
+
+        if len(store) < min_episodes:
+            print(f'\n{"="*60}')
+            print(f'Phase 1: Auto-Collecting Trajectories')
+            print(f'  Store has {len(store)} trajectories, need {min_episodes}')
+            print(f'  Collecting {collect_per_game} episodes per game...')
+            print(f'{"="*60}\n')
+
+            _auto_collect_trajectories(
+                registry=registry,
+                store=store,
+                episodes_per_game=collect_per_game,
+                config=config,
+            )
+
+            print(f'\nCollection complete. Store now has {len(store)} trajectories.')
+            stats = store.get_stats()
+            for gid, gstats in stats.get('games', {}).items():
+                print(f'  Game {gid}: {gstats["count"]} trajectories, '
+                      f'avg return {gstats["avg_return"]:.1f}')
+            print()
+
+        if len(store) == 0:
+            print('ERROR: No trajectories collected. Cannot train DT.')
+            sys.exit(1)
+
+        print(f'\n{"="*60}')
+        print(f'Phase 2: Training Decision Transformer')
+        print(f'  Trajectories: {len(store)}')
+        print(f'{"="*60}\n')
+
+        trainer.train()
+
+    print('\nDecision Transformer pipeline complete.')
+
+
 def main():
     """Main entry point for training and evaluation."""
     args = parse_args()
+
+    # Initialize game registry
+    registry = GameRegistry()
+    registry.discover()
+
+    if args.list_games:
+        print('\nAvailable games:')
+        for adapter in registry.list_games():
+            print(f'  {adapter.game_id:12s}  [{adapter.category:10s}]  {adapter.name}')
+        sys.exit(0)
+
+    # Validate game selection
+    try:
+        game_adapter = registry.get_game(args.game)
+    except KeyError as e:
+        print(f'\nError: {e}')
+        print('Use --list-games to see available games.')
+        sys.exit(1)
+
+    print(f'\nGame: {game_adapter.name} ({game_adapter.game_id})')
+
+    # Validate algorithm compatibility
+    supported = game_adapter.supported_algorithms()
+    if args.algorithm not in supported:
+        print(f'\nError: {game_adapter.name} does not support {args.algorithm.upper()}.')
+        print(f'  Supported algorithms: {", ".join(a.upper() for a in supported)}')
+        sys.exit(1)
 
     num_envs = max(1, args.num_envs)
 
@@ -231,10 +600,11 @@ def main():
         args.next_stage = False
 
     print(f'\n{"="*60}')
-    print(f'  Super Mario Bros ML Training')
+    print(f'  {game_adapter.name} — ML Training')
     print(f'  Algorithm: {args.algorithm.upper()}')
     print(f'  Mode: {"Evaluation" if args.eval else "Training"}')
-    print(f'  World: {args.world}-{args.stage}')
+    if args.game == 'mario':
+        print(f'  World: {args.world}-{args.stage}')
     print(f'  Visualization: {"ON" if args.visualize else "OFF"}')
     if num_envs > 1:
         print(f'  Parallel Envs: {num_envs}')
@@ -244,17 +614,61 @@ def main():
         print(f'  Curriculum Learning: ON (all 32 stages)')
     print(f'{"="*60}\n')
 
+    # Parse game-specific options from --game-opts key=value pairs
+    game_kwargs = parse_game_opts(args.game_opts)
+    if game_kwargs:
+        print(f'  Game options: {game_kwargs}')
+
+    # ================================================================
+    # Decision Transformer — separate pipeline (offline multi-game)
+    # ================================================================
+    if args.algorithm == 'dt':
+        _run_decision_transformer(args, registry, game_adapter)
+        return
+
     # ================================================================
     # Create Environment
     # ================================================================
-    # NEAT uses a smaller observation space (13x13)
-    # PPO and DQN use standard 84x84 with frame stacking
-    if args.algorithm == 'neat':
+    # Mario uses its own factory functions for backward compatibility
+    # (CustomRewardWrapper, frame-stacking, etc.).
+    # All other games go through the universal adapter path.
+    if args.game == 'mario' and args.algorithm == 'neat':
+        from src.environment.mario_env import create_neat_env
         env = create_neat_env(world=args.world, stage=args.stage)
         print(f'Environment: NEAT mode (13x13 grayscale)')
-    else:
+    elif args.game == 'mario':
+        from src.environment.mario_env import create_cnn_env
         env = create_cnn_env(world=args.world, stage=args.stage)
         print(f'Environment: CNN mode (84x84x4 stacked frames)')
+    else:
+        from src.environment.universal_env import create_env_from_adapter
+        # Create opponent for board games
+        opponent = None
+        board_games = {'chess', 'checkers', 'connect4', 'tictactoe'}
+        if args.game in board_games:
+            if args.opponent == 'auto-difficulty':
+                from src.opponents.difficulty_curriculum import DifficultyCurriculum
+                curriculum = DifficultyCurriculum(game_id=args.game)
+                opponent = curriculum.create_opponent()
+                game_kwargs['_difficulty_curriculum'] = curriculum
+            elif args.opponent == 'minimax':
+                from src.opponents import MinimaxOpponent
+                opponent = MinimaxOpponent(depth=args.opponent_depth, game_id=args.game)
+            elif args.opponent == 'model' and args.opponent_model:
+                from src.opponents import ModelOpponent
+                opponent = ModelOpponent(args.opponent_model)
+            elif args.opponent == 'human':
+                from src.opponents import HumanOpponent
+                opponent = HumanOpponent()
+            else:
+                from src.opponents import RandomOpponent
+                opponent = RandomOpponent()
+            game_kwargs['opponent'] = opponent
+            print(f'Opponent: {opponent.__class__.__name__}')
+        env_kwargs = {k: v for k, v in game_kwargs.items()
+                      if not k.startswith('_')}
+        env = create_env_from_adapter(game_adapter, **env_kwargs)
+        print(f'Environment: {game_adapter.name} {env.observation_space.shape}')
 
     print(f'Observation space: {env.observation_space.shape}')
     print(f'Action space: {env.action_space.n} actions\n')
@@ -262,6 +676,7 @@ def main():
     # ================================================================
     # Create Recorder (if requested)
     # ================================================================
+    from src.streaming.recording import Recorder
     recorder = None
     if args.record:
         os.makedirs('recordings', exist_ok=True)
@@ -295,15 +710,18 @@ def main():
         from src.streaming.stream_manager import StreamManager
         from src.streaming.overlay_manager import OverlayManager
 
-        # Get first music file for audio stream (if available)
-        audio_file = None
+        # Pass full music playlist to stream (ffmpeg will loop through all
+        # tracks using its concat demuxer — independent of pygame playback).
+        # Shuffle so the stream gets tracks in random order, not alphabetical.
+        audio_files = []
         if music_manager and music_manager.playlist:
-            audio_file = music_manager.playlist[0]
+            audio_files = list(music_manager.playlist)  # copy
+            random.shuffle(audio_files)
 
         stream_manager = StreamManager(
             twitch_key=twitch_key,
             youtube_key=youtube_key,
-            audio_file=audio_file,
+            audio_files=audio_files,
         )
         overlay_manager = OverlayManager(resolution=(1280, 720))
 
@@ -334,8 +752,14 @@ def main():
     # ================================================================
     # Create Visualization Dashboard
     # ================================================================
+    from src.visualization.dashboard import Dashboard
     dashboard = None
     if args.visualize:
+        # Extract game-specific dashboard metadata from the adapter
+        action_info = game_adapter.get_action_space_info()
+        dash_config = game_adapter.get_dashboard_config()
+        completion_criteria = game_adapter.get_completion_criteria()
+
         dashboard = Dashboard(
             algorithm=args.algorithm,
             num_envs=num_envs,
@@ -343,13 +767,52 @@ def main():
             music_manager=music_manager,
             stream_manager=stream_manager,
             overlay_manager=overlay_manager,
+            game_name=game_adapter.name,
+            action_labels=action_info.action_labels,
+            dashboard_config=dash_config,
+            completion_criteria=completion_criteria,
         )
         print('Dashboard window opened.')
 
     # ================================================================
     # Create Trainer
     # ================================================================
+
+    # Build an env factory for SB3 multi-env setups (PPO, A2C).
+    # Non-Mario games need a factory that creates fresh envs of the
+    # correct type; Mario uses its own create_cnn_env factory.
+    sb3_env_factory = None
+    if args.game != 'mario' and game_adapter is not None:
+        from src.environment.universal_env import create_env_from_adapter
+        from src.environment.wrappers import SB3CompatWrapper
+        _adapter = game_adapter
+        _gk = dict(game_kwargs)  # snapshot for closure
+
+        def sb3_env_factory():
+            e = create_env_from_adapter(_adapter, **_gk)
+            return SB3CompatWrapper(e)
+
+    # Apply game-specific training hints on top of default config.
+    # Each adapter can override hyperparameters (e.g., Tetris wants higher
+    # entropy for exploration, lower death penalty, etc.).
+    def _apply_training_hints(config, adapter, algorithm):
+        if adapter is None:
+            return config
+        hints = adapter.get_training_hints()
+        if not hints:
+            return config
+        # Apply algo-specific hints first, then global hints
+        algo_hints = hints.pop(algorithm, {}) if isinstance(hints.get(algorithm), dict) else {}
+        for key, val in hints.items():
+            if not isinstance(val, dict):  # Skip nested algo dicts
+                config[key] = val
+        for key, val in algo_hints.items():
+            config[key] = val
+        return config
+
     if args.algorithm == 'neat':
+        from src.algorithms.neat.neat_trainer import NEATTrainer
+        from src.algorithms.neat.parallel_eval import ParallelGenomeEvaluator
         config_path = os.path.join(project_root, 'config', 'neat_config.txt')
         trainer = NEATTrainer(
             env=env,
@@ -361,9 +824,11 @@ def main():
         )
 
     elif args.algorithm == 'ppo':
+        from src.algorithms.ppo.ppo_trainer import PPOTrainer
         config_path = os.path.join(project_root, 'config', 'ppo_config.yaml')
         with open(config_path, 'r') as f:
             config = yaml.safe_load(f)
+        config = _apply_training_hints(config, game_adapter, 'ppo')
         trainer = PPOTrainer(
             env=env,
             config=config,
@@ -371,12 +836,16 @@ def main():
             num_envs=num_envs,
             world=args.world,
             stage=args.stage,
+            device_preference=args.device,
+            env_factory=sb3_env_factory,
         )
 
     elif args.algorithm == 'dqn':
+        from src.algorithms.dqn.dqn_trainer import DQNTrainer
         config_path = os.path.join(project_root, 'config', 'dqn_config.yaml')
         with open(config_path, 'r') as f:
             config = yaml.safe_load(f)
+        config = _apply_training_hints(config, game_adapter, 'dqn')
         trainer = DQNTrainer(
             env=env,
             config=config,
@@ -384,15 +853,121 @@ def main():
             num_envs=num_envs,
             world=args.world,
             stage=args.stage,
+            device_preference=args.device,
+            env_factory=sb3_env_factory,
         )
 
+    elif args.algorithm == 'a2c':
+        from src.algorithms.a2c.a2c_trainer import A2CTrainer
+        config_path = os.path.join(project_root, 'config', 'a2c_config.yaml')
+        with open(config_path, 'r') as f:
+            config = yaml.safe_load(f)
+        config = _apply_training_hints(config, game_adapter, 'a2c')
+        trainer = A2CTrainer(
+            env=env,
+            config=config,
+            visualizer=dashboard,
+            num_envs=num_envs,
+            device_preference=args.device,
+            env_factory=sb3_env_factory,
+        )
+
+    elif args.algorithm == 'rainbow':
+        from src.algorithms.rainbow.rainbow_trainer import RainbowTrainer
+        config_path = os.path.join(project_root, 'config', 'rainbow_config.yaml')
+        with open(config_path, 'r') as f:
+            config = yaml.safe_load(f)
+        config = _apply_training_hints(config, game_adapter, 'rainbow')
+        trainer = RainbowTrainer(
+            env=env,
+            config=config,
+            visualizer=dashboard,
+            num_envs=num_envs,
+            world=args.world,
+            stage=args.stage,
+            device_preference=args.device,
+        )
+
+    # Tag the trainer with the game so metadata.json records it.
+    trainer.game_id = args.game
+
+    # Set completion criteria for auto-stop when game is mastered.
+    # Each adapter defines what "mastered" means (e.g., 95% win rate
+    # over 100 games for TicTacToe, avg lines > 20 for Tetris).
+    if game_adapter:
+        criteria = game_adapter.get_completion_criteria()
+        if criteria:
+            trainer.set_completion_criteria(criteria)
+
+    # Initialize event bus and achievement tracking
+    event_bus = EventBus()
+    achievement_mgr = AchievementManager(event_bus)
+    achievement_mgr.set_active_agent(f'{args.game}_{args.algorithm}')
+    trainer.event_bus = event_bus
+
+    # Wire up difficulty curriculum to event bus (if active)
+    if '_difficulty_curriculum' in game_kwargs:
+        curriculum = game_kwargs['_difficulty_curriculum']
+        curriculum._bus = event_bus
+        event_bus.subscribe('episode_complete', curriculum._on_episode)
+
+    # Record this session for trainer achievements
+    achievement_mgr.record_session(
+        args.game, args.algorithm,
+        streamed=bool(getattr(args, 'stream_twitch', None) or getattr(args, 'stream_youtube', None))
+    )
+
+    # Initialize milestone recorder for training replay markers
+    milestone_recorder = None
+    if recorder:  # Only if video recording is enabled
+        try:
+            from src.recording.milestone_recorder import MilestoneRecorder
+            milestone_recorder = MilestoneRecorder(event_bus=event_bus,
+                                                    output_dir='recordings')
+            milestone_recorder.start_recording()
+            print('  Milestone recorder enabled — markers will be saved with recording')
+        except Exception as e:
+            print(f'  Note: Milestone recording disabled ({e})')
+
+    # Pass dashboard config to trainer so callbacks know which
+    # info-dict keys to extract and how many actions to track.
+    trainer.dashboard_config = game_adapter.get_dashboard_config()
+    action_info = game_adapter.get_action_space_info()
+    trainer.num_actions = action_info.num_actions
+
+    # Enable automatic DT trajectory collection so specialist agents
+    # build up the experience store the Decision Transformer needs.
+    if args.algorithm not in ('dt', 'neat') and not args.eval:
+        try:
+            from src.experience.experience_store import ExperienceStore
+            dt_store = ExperienceStore(store_dir='experience_store')
+            trainer.enable_dt_collection(dt_store, game_adapter)
+        except Exception as e:
+            print(f'  Note: DT collection disabled ({e})')
+
     # ================================================================
-    # Load Checkpoint (if specified)
+    # Load Checkpoint (explicit or auto-resume)
     # ================================================================
     if args.load:
         print(f'Loading checkpoint: {args.load}')
         trainer.load_checkpoint(args.load)
         print('Checkpoint loaded successfully.\n')
+    elif not args.eval:
+        # Auto-resume: check for an existing training session
+        # Only resume if the checkpoint was trained on the same game.
+        resume_path, resume_meta = find_resume_checkpoint(args.algorithm, args.game)
+        if resume_path:
+            ep = resume_meta.get('episode', '?')
+            best = resume_meta.get('best_reward', '?')
+            elapsed = resume_meta.get('elapsed_time', '?')
+            print(f'  Found existing training session:')
+            print(f'    Episodes: {ep}  |  Best reward: {best}  |  Time: {elapsed}')
+            print(f'    Resuming from: {resume_path}')
+            trainer.load_checkpoint(resume_path)
+            trainer.episode_count = int(resume_meta.get('episode', 0))
+            trainer.best_reward = float(resume_meta.get('best_reward', float('-inf')))
+            trainer.best_distance = int(resume_meta.get('best_distance', 0))
+            print('  Checkpoint loaded. Continuing training.\n')
 
     # ================================================================
     # Run Training or Evaluation
@@ -411,6 +986,20 @@ def main():
         _pg.event.pump()      # Process internal pygame events
         _pg.event.clear()     # Discard any queued events (incl. stale QUIT)
         dashboard.update()    # Render initial dashboard frame
+
+        # Set training target so the progress bar knows the total
+        if args.algorithm == 'neat':
+            target = args.episodes or 100
+        elif args.algorithm in ('ppo', 'a2c'):
+            if args.episodes:
+                target = args.episodes * 1000
+            else:
+                target = config.get('total_timesteps', 1_000_000)
+        elif args.algorithm in ('dqn', 'rainbow'):
+            target = args.episodes or config.get('num_episodes', 5000)
+        else:
+            target = 0
+        dashboard.set_training_target(target)
 
     if music_manager:
         music_manager.play()
@@ -450,6 +1039,19 @@ def main():
                 elif args.algorithm == 'dqn':
                     num_episodes = args.episodes or config.get('num_episodes', 5000)
                     print(f'Training DQN on World {current_world}-{current_stage} '
+                          f'for {num_episodes:,} episodes...\n')
+                    trainer.train(num_episodes=num_episodes)
+
+                elif args.algorithm == 'a2c':
+                    if args.episodes:
+                        config['total_timesteps'] = args.episodes * 1000
+                    timesteps = config.get('total_timesteps', 1_000_000)
+                    print(f'Training A2C for {timesteps:,} timesteps...\n')
+                    trainer.train()
+
+                elif args.algorithm == 'rainbow':
+                    num_episodes = args.episodes or config.get('num_episodes', 5000)
+                    print(f'Training Rainbow DQN on World {current_world}-{current_stage} '
                           f'for {num_episodes:,} episodes...\n')
                     trainer.train(num_episodes=num_episodes)
 
@@ -570,12 +1172,42 @@ def main():
                                 _create_cnn(world=current_world, stage=current_stage)
                             )
 
+        # Generate agent personality profile after training
+        if not args.eval:
+            try:
+                from src.achievements.profile import generate_profile
+                meta_path = os.path.join(trainer.save_dir, args.algorithm, 'metadata.json')
+                if os.path.isfile(meta_path):
+                    profile = generate_profile(meta_path)
+                    profile_path = os.path.join(trainer.save_dir, args.algorithm, 'profile.json')
+                    with open(profile_path, 'w') as f:
+                        json.dump({
+                            'agent_id': profile.agent_id,
+                            'game_id': profile.game_id,
+                            'algorithm': profile.algorithm,
+                            'play_style': profile.play_style,
+                            'consistency': profile.consistency,
+                            'exploration': profile.exploration,
+                            'speed': profile.speed,
+                            'resilience': profile.resilience,
+                            'peak_performance': profile.peak_performance,
+                            'total_episodes': profile.total_episodes,
+                            'best_reward': profile.best_reward,
+                        }, f, indent=2)
+                    print(f'  Agent profile saved: {profile.play_style} ({profile_path})')
+            except Exception as e:
+                print(f'  Note: Profile generation skipped ({e})')
+
     except KeyboardInterrupt:
         print('\n\nTraining interrupted by user.')
     except SystemExit:
         pass
     finally:
         # Cleanup
+        if milestone_recorder:
+            # Use the recorder's output filename for the markers sidecar
+            recording_file = getattr(recorder, 'output_path', None) or getattr(recorder, '_output_path', None)
+            milestone_recorder.stop_recording(recording_file)
         if stream_manager:
             stream_manager.stop()
         if recorder:

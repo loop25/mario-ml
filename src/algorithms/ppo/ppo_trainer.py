@@ -37,8 +37,9 @@ from stable_baselines3.common.callbacks import BaseCallback
 from stable_baselines3.common.vec_env import DummyVecEnv, VecFrameStack, VecTransposeImage
 
 from src.algorithms.base_trainer import BaseTrainer
+from src.algorithms.device import select_device
+from src.algorithms.frame_utils import capture_display_frame, capture_display_frame_from_vec_env
 from src.visualization.dashboard import Dashboard
-from src.environment.mario_env import create_mario_env, create_sb3_env
 
 
 class DashboardCallback(BaseCallback):
@@ -80,9 +81,22 @@ class DashboardCallback(BaseCallback):
         # not just env 0.
         num_envs = max(1, trainer.num_envs)
         self._env_episode_rewards = [0.0] * num_envs
-        self._env_episode_distances = [0] * num_envs
+        self._env_episode_metric = [0] * num_envs  # game-specific metric
         self._env_stage_completed = [False] * num_envs
-        self._env_action_counts = [[0] * 7 for _ in range(num_envs)]
+
+        # Dynamic action count size from game adapter
+        num_actions = trainer.num_actions
+        self._num_actions = num_actions
+        self._env_action_counts = [[0] * num_actions for _ in range(num_envs)]
+
+        # Dashboard config for game-specific metric extraction
+        dash_cfg = trainer.dashboard_config or {}
+        self._info_key = dash_cfg.get('graph_2_info_key', 'x_pos')
+        self._metric_name = dash_cfg.get('graph_2_metric', 'distance')
+
+        # Win tracking for board games (Connect4 etc.)
+        if self._metric_name == 'win_rate':
+            self._win_tracker = {'wins': 0, 'losses': 0, 'total': 0}
 
     def _on_step(self) -> bool:
         """
@@ -111,24 +125,30 @@ class DashboardCallback(BaseCallback):
         dones = self.locals.get('dones', [False])
 
         # Accumulate per-env episode stats
+        new_obs = self.locals.get('new_obs')
+
         for i in range(min(num_envs, len(rewards))):
             self._env_episode_rewards[i] += rewards[i]
 
-            # Track action
+            # Track action (dynamic action space size)
             if i < len(actions):
                 action = int(actions[i])
-                if 0 <= action < 7:
+                if 0 <= action < self._num_actions:
                     self._env_action_counts[i][action] += 1
 
-            # Track distance & stage completion
+            # Track game-specific metric & stage completion
             if i < len(infos):
                 info = infos[i]
-                x_pos = info.get('x_pos', 0)
-                self._env_episode_distances[i] = max(
-                    self._env_episode_distances[i], x_pos,
+                metric_val = info.get(self._info_key, 0)
+                self._env_episode_metric[i] = max(
+                    self._env_episode_metric[i], metric_val,
                 )
                 if info.get('stage_completed', False):
                     self._env_stage_completed[i] = True
+
+        # DT trajectory collection from env 0
+        if new_obs is not None and len(actions) > 0:
+            self.trainer._dt_record_step(new_obs[0], int(actions[0]), float(rewards[0]))
 
         # --- Live gameplay display ---
         # Frame capture is expensive, so we throttle it.
@@ -136,17 +156,15 @@ class DashboardCallback(BaseCallback):
 
         if self.dashboard and self.num_timesteps % display_interval == 0:
             if num_envs > 1:
-                # Multi-env: grab full-res NES frames from each env.
+                # Multi-env: grab display frames from each env for grid.
                 self._latest_frames = []
                 try:
                     vec_env = self.trainer.vec_env
                     dummy_env = vec_env.venv if hasattr(vec_env, 'venv') else vec_env
                     for i in range(min(num_envs, len(dummy_env.envs))):
-                        try:
-                            frame = dummy_env.envs[i].unwrapped.screen.copy()
+                        frame = capture_display_frame(dummy_env.envs[i])
+                        if frame is not None:
                             self._latest_frames.append(frame)
-                        except (AttributeError, Exception):
-                            pass
                 except (AttributeError, Exception):
                     pass
 
@@ -157,18 +175,13 @@ class DashboardCallback(BaseCallback):
                     ):
                         return False
             else:
-                # Single env: grab the full-res NES screen
-                try:
-                    self._latest_frame = self.trainer.env.unwrapped.screen
-                except AttributeError:
-                    if self.locals.get('new_obs') is not None:
-                        obs = self.locals['new_obs']
-                        if len(obs) > 0:
-                            frame = obs[0]
-                            if frame.ndim == 3:
-                                self._latest_frame = frame[-1] if frame.shape[0] <= 4 else frame
-                            else:
-                                self._latest_frame = frame
+                # Single env: grab display frame.
+                frame = capture_display_frame_from_vec_env(
+                    self.trainer.vec_env,
+                    fallback_obs=self._latest_frame,
+                )
+                if frame is not None:
+                    self._latest_frame = frame
 
                 if self._latest_frame is not None:
                     if not self.trainer.update_visualization(
@@ -201,7 +214,20 @@ class DashboardCallback(BaseCallback):
         """
         self.episode_count += 1
         reward = self._env_episode_rewards[env_index]
-        distance = self._env_episode_distances[env_index]
+        game_metric = self._env_episode_metric[env_index]
+
+        # For win_rate games, compute running win rate
+        if self._metric_name == 'win_rate':
+            # 'winner' info key → 1 means agent won, 2 means opponent won
+            if hasattr(self, '_win_tracker'):
+                self._win_tracker['total'] += 1
+                if game_metric == 1:
+                    self._win_tracker['wins'] += 1
+                elif game_metric == 2:
+                    self._win_tracker['losses'] += 1
+                game_metric = (
+                    self._win_tracker['wins'] / self._win_tracker['total']
+                )
 
         # Log stage completion
         if self._env_stage_completed[env_index]:
@@ -214,33 +240,70 @@ class DashboardCallback(BaseCallback):
         self.trainer.episode_count = self.episode_count
         if reward > self.trainer.best_reward:
             self.trainer.best_reward = reward
-        if distance > self.trainer.best_distance:
-            self.trainer.best_distance = distance
+            self.trainer.publish_new_best(reward)
+        if game_metric > self.trainer.best_distance:
+            self.trainer.best_distance = game_metric
+
+        # Publish event bus episode_complete (achievements, milestones, etc.)
+        self.trainer.publish_episode_complete(reward, {
+            'game_metric': game_metric,
+            'stage_completed': self._env_stage_completed[env_index],
+        })
+
+        # Finalize DT trajectory when env 0 completes an episode
+        if env_index == 0:
+            self.trainer._dt_finalize_episode()
 
         # Notify episode callbacks (curriculum learning, etc.)
         self.trainer._fire_episode_complete(
             reward=reward,
-            distance=distance,
+            distance=game_metric,
             completed=self._env_stage_completed[env_index],
         )
+
+        # Check mastery — auto-stop when agent has mastered the game.
+        # Build an info dict with the relevant metric for check_mastery.
+        mastery_info = {self._info_key: game_metric}
+        if self._metric_name == 'win_rate':
+            mastery_info['winner'] = 1 if self._env_stage_completed[env_index] else 0
+            # Also pass raw winner value from the last info if available
+            try:
+                vec_env = self.trainer.vec_env
+                last_info = self.locals.get('infos', [{}])
+                if env_index < len(last_info):
+                    mastery_info['winner'] = last_info[env_index].get('winner', 0)
+            except Exception:
+                pass
+        mastery_info[self._metric_name] = game_metric
+        if self.trainer.check_mastery(mastery_info):
+            print('  Auto-stopping: game mastered! Saving final model...')
+            self.trainer._save_on_exit()
+            return False  # Stop training
 
         # Update dashboard
         if self.dashboard:
             loss = 0.0  # Updated in _on_rollout_end instead
 
             # Aggregate action counts across all envs for the graph
-            combined_actions = [0] * 7
+            combined_actions = [0] * self._num_actions
             for env_counts in self._env_action_counts:
-                for j in range(7):
+                for j in range(self._num_actions):
                     combined_actions[j] += env_counts[j]
 
             metrics = {
                 'episode': self.episode_count,
                 'reward': reward,
-                'distance': distance,
+                self._metric_name: game_metric,
                 'loss': loss,
                 'action_distribution': combined_actions,
             }
+
+            # Report opponent_win_rate for dual-line chart
+            if self._metric_name == 'win_rate' and hasattr(self, '_win_tracker'):
+                total = self._win_tracker['total']
+                metrics['opponent_win_rate'] = (
+                    self._win_tracker['losses'] / total if total > 0 else 0
+                )
 
             num_envs = self.trainer.num_envs
 
@@ -263,9 +326,9 @@ class DashboardCallback(BaseCallback):
 
         # Reset tracking for this env only (other envs may still be mid-episode)
         self._env_episode_rewards[env_index] = 0.0
-        self._env_episode_distances[env_index] = 0
+        self._env_episode_metric[env_index] = 0
         self._env_stage_completed[env_index] = False
-        self._env_action_counts[env_index] = [0] * 7
+        self._env_action_counts[env_index] = [0] * self._num_actions
         return True
 
     def _on_rollout_end(self) -> None:
@@ -326,20 +389,25 @@ class PPOTrainer(BaseTrainer):
         num_envs: int = 1,
         world: int = 1,
         stage: int = 1,
+        device_preference: Optional[str] = None,
+        env_factory=None,
     ):
         super().__init__(env, config, visualizer, save_dir, log_dir)
 
         self.num_envs = num_envs
         self.world = world
         self.stage = stage
+        self._env_factory = env_factory
 
         # Wrap the environment for stable-baselines3 compatibility
         # PPO needs: vectorized env, transposed images (channels first)
         self.vec_env = self._wrap_env_for_sb3(env, num_envs=num_envs)
 
-        # Determine safe device (CUDA may report available but fail
-        # on newer GPUs like RTX 5070 Blackwell/sm_120 with cu124)
-        device = self._select_device()
+        # Centralized device selection with auto-detection
+        # SB3 accepts both torch.device and string
+        device = select_device(
+            preference=device_preference, algo_name='PPO'
+        )
 
         # Create PPO model with CNN policy
         self.model = PPO(
@@ -359,37 +427,6 @@ class PPOTrainer(BaseTrainer):
             tensorboard_log=None,  # Disabled: use our dashboard instead
             device=device,
         )
-
-    @staticmethod
-    def _select_device() -> str:
-        """Return ``'cuda'`` if CUDA works, otherwise ``'cpu'``.
-
-        Runs a quick smoke test to verify GPU kernels actually work.
-        Some GPUs report CUDA available but fail on execution with
-        older CUDA toolkit versions.
-
-        Fix: Install PyTorch with CUDA 12.8+:
-            pip install torch torchvision --index-url https://download.pytorch.org/whl/cu128
-        """
-        try:
-            import torch
-            if torch.cuda.is_available():
-                a = torch.randn(4, 4, device='cuda')
-                _ = a @ a.T
-                del a
-                torch.cuda.empty_cache()
-                gpu = torch.cuda.get_device_name(0)
-                vram = torch.cuda.get_device_properties(0).total_mem
-                vram_gb = round(vram / 1024**3, 1)
-                print(f'PPO using device: cuda ({gpu}, {vram_gb}GB VRAM)')
-                return 'cuda'
-        except (RuntimeError, Exception):
-            pass
-        print('PPO using device: cpu')
-        print('  Tip: Install CUDA-enabled PyTorch for GPU acceleration:')
-        print('  pip install torch torchvision '
-              '--index-url https://download.pytorch.org/whl/cu128')
-        return 'cpu'
 
     def _wrap_env_for_sb3(self, env, num_envs: int = 1):
         """
@@ -423,21 +460,27 @@ class PPOTrainer(BaseTrainer):
             # Single env — simple DummyVecEnv wrapper
             compat_env = SB3CompatWrapper(env)
             vec_env = DummyVecEnv([lambda: compat_env])
+        elif self._env_factory:
+            # Multi-env with env factory (non-Mario games).
+            # The factory creates a fresh, correctly-typed env each time.
+            vec_env = DummyVecEnv([self._env_factory for _ in range(num_envs)])
+            print(f'  PPO: Using DummyVecEnv with {num_envs} environments (same process)')
         else:
-            # Multi-env — create N environments in the SAME process.
-            # nes_py's NES emulator uses a C library that crashes when
-            # used in subprocesses (SubprocVecEnv), so we use DummyVecEnv
-            # which steps envs sequentially in the main process.
+            # Multi-env fallback for Mario — create N environments in the
+            # SAME process.  nes_py's NES emulator uses a C library that
+            # crashes in subprocesses (SubprocVecEnv), so we use DummyVecEnv.
             world, stage = self.world, self.stage
 
             # Store extra envs so we can access .unwrapped for frames.
             # Pump pygame events between env creations to prevent
             # Windows "Not Responding" during long setup.
-            try:
-                import pygame
-                _pump = pygame.event.pump
-            except (ImportError, Exception):
-                _pump = lambda: None
+            def _safe_pump():
+                try:
+                    import pygame
+                    if pygame.get_init() and pygame.display.get_init():
+                        pygame.event.pump()
+                except Exception:
+                    pass
 
             self._extra_envs = []
             env_wrappers = [SB3CompatWrapper(env)]  # First env is the one passed in
@@ -446,7 +489,7 @@ class PPOTrainer(BaseTrainer):
                 new_env = create_cnn_env(world=world, stage=stage)
                 self._extra_envs.append(new_env)
                 env_wrappers.append(SB3CompatWrapper(new_env))
-                _pump()  # Keep window responsive
+                _safe_pump()  # Keep window responsive
 
             # Use DummyVecEnv — all envs run in the main process.
             # Each lambda captures its own wrapper instance.
@@ -455,6 +498,16 @@ class PPOTrainer(BaseTrainer):
                 for wrapper in env_wrappers
             ])
             print(f'  PPO: Using DummyVecEnv with {num_envs} environments (same process)')
+
+        # Frame stacking: stack N frames to give the CNN temporal information.
+        # Without this, the agent sees a single static image and can't perceive
+        # motion (e.g., which direction a Tetris piece is falling).
+        # Mario's create_cnn_env() handles its own stacking, so we only apply
+        # this for non-Mario games (single-channel observations).
+        n_stack = self.config.get('frame_stack', 4)
+        obs_shape = vec_env.observation_space.shape  # (H, W, C) before transpose
+        if obs_shape and len(obs_shape) == 3 and obs_shape[-1] == 1:
+            vec_env = VecFrameStack(vec_env, n_stack=n_stack)
 
         # Transpose observations to channel-first (H,W,C) -> (C,H,W)
         vec_env = VecTransposeImage(vec_env)
@@ -484,6 +537,9 @@ class PPOTrainer(BaseTrainer):
         print(f'Learning rate: {self.config.get("learning_rate", 2.5e-4)}')
         print(f'{"="*60}\n')
 
+        # Publish training start event (achievements, milestones, etc.)
+        self.publish_training_start()
+
         # Create callback for dashboard updates
         callback = DashboardCallback(
             dashboard=self.visualizer,
@@ -501,6 +557,10 @@ class PPOTrainer(BaseTrainer):
             print('\nTraining interrupted.')
 
         self.is_training = False
+
+        # Publish training end event (achievements, milestones, etc.)
+        self.publish_training_end(self.episode_count)
+
         print(f'\n{"="*60}')
         print(f'PPO Training Complete!')
         print(f'Episodes: {self.episode_count}')
@@ -547,12 +607,16 @@ class PPOTrainer(BaseTrainer):
                         frame = self.env.unwrapped.screen
                     except AttributeError:
                         frame = obs[0][-1] if obs[0].ndim == 3 else obs[0]
+
+                    dash_cfg = self.dashboard_config or {}
+                    info_key = dash_cfg.get('graph_2_info_key', 'x_pos')
+                    metric_name = dash_cfg.get('graph_2_metric', 'distance')
                     self.update_visualization(
                         frame=frame,
                         metrics={
                             'episode': ep + 1,
                             'reward': episode_reward,
-                            'distance': info[0].get('x_pos', 0),
+                            metric_name: info[0].get(info_key, 0),
                         },
                     )
 
@@ -560,9 +624,12 @@ class PPOTrainer(BaseTrainer):
                     break
 
             total_rewards.append(episode_reward)
-            distance = info[0].get('x_pos', 0) if info else 0
+            dash_cfg = self.dashboard_config or {}
+            info_key = dash_cfg.get('graph_2_info_key', 'x_pos')
+            metric_label = dash_cfg.get('status_metric_label', 'Distance')
+            metric_val = info[0].get(info_key, 0) if info else 0
             print(f'  Eval Episode {ep+1}: '
-                  f'Reward={episode_reward:.0f}, Distance={distance}')
+                  f'Reward={episode_reward:.0f}, {metric_label}={metric_val}')
 
         avg_reward = np.mean(total_rewards)
         print(f'\n  Average Eval Reward: {avg_reward:.0f}')
