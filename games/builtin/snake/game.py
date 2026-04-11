@@ -120,6 +120,12 @@ class SnakeEnv(gym.Env):
             self.snake.pop()  # Remove tail (no growth)
             self._steps_since_food += 1
 
+            # Tiny proximity signal: reward moving closer to food,
+            # penalize moving away. Keeps total shaping << food reward.
+            old_dist = abs(head_r - self.food[0]) + abs(head_c - self.food[1])
+            new_dist = abs(new_head[0] - self.food[0]) + abs(new_head[1] - self.food[1])
+            reward = (old_dist - new_dist) * 0.005  # ~±0.005 per step
+
         # Timeout check
         done = self._steps_since_food >= self.max_steps_without_food
 

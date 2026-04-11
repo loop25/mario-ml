@@ -125,14 +125,16 @@ class CheckersEnv(gym.Env):
         self._check_promotion()
         step_reward = invalid_penalty
 
-        # Reward for capturing an opponent piece
+        # Reward for capturing an opponent piece.
+        # Kept small so total captures (max ~12) sum to < 0.12,
+        # well below the terminal win/loss of ±1.0.
         opp_pieces_after = sum(1 for p in self.board if p in (P2_MAN, P2_KING))
         if opp_pieces_after < opp_pieces_before:
-            step_reward += 0.1  # Capture bonus
+            step_reward += 0.01  # Capture bonus (small)
 
         # Reward for king promotion
         if not was_king_before and self.board[to_pos] == P1_KING:
-            step_reward += 0.05
+            step_reward += 0.005
 
         # Check if opponent has no pieces or no moves
         if self._player_lost(player=2):
@@ -170,7 +172,7 @@ class CheckersEnv(gym.Env):
         # Penalty for losing a piece to opponent
         agent_pieces_after = sum(1 for p in self.board if p in (P1_MAN, P1_KING))
         if agent_pieces_after < agent_pieces_before:
-            step_reward -= 0.1
+            step_reward -= 0.01
 
         # Check if agent has no pieces or no moves
         if self._player_lost(player=1):

@@ -96,10 +96,13 @@ class ChessEnv(gym.Env):
             return self._render_obs(), -1.0, True, self._info()
 
         # Piece value table for intermediate capture rewards.
-        # Gives the agent signal before checkmate (the sparse terminal reward).
+        # IMPORTANT: These must be very small relative to the terminal
+        # win/loss (±1.0). If too large, the agent learns "maximize
+        # captures" instead of "win the game." Total possible captures
+        # over a game should sum to << 1.0.
         _PIECE_VALUES = {
-            chess.PAWN: 0.01, chess.KNIGHT: 0.03, chess.BISHOP: 0.03,
-            chess.ROOK: 0.05, chess.QUEEN: 0.09,
+            chess.PAWN: 0.001, chess.KNIGHT: 0.003, chess.BISHOP: 0.003,
+            chess.ROOK: 0.005, chess.QUEEN: 0.009,
         }
 
         # Track captured piece and compute capture reward
@@ -112,10 +115,11 @@ class ChessEnv(gym.Env):
                 self._captured_black.append(captured.piece_type)
                 step_reward += _PIECE_VALUES.get(captured.piece_type, 0.0)
 
-        # Small reward for giving check (aggressive play)
+        # Tiny reward for giving check (encourages aggression without
+        # dominating the terminal win signal)
         self.board.push(move)
         if self.board.is_check():
-            step_reward += 0.02
+            step_reward += 0.002
         self.board.pop()
 
         # Execute agent move (White)
