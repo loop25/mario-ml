@@ -178,8 +178,9 @@ class TetrisEnv(gym.Env):
             cleared = self._clear_lines()
             self._last_clear_count = cleared
 
-            # Scoring: heavily reward line clears — this is the primary signal.
-            # Scaled so clearing lines vastly outweighs survival/death signals.
+            # Scoring: line clears are the ONLY significant reward.
+            # Survival reward removed — it caused agents to learn "stack
+            # randomly for guaranteed +50" instead of "clear lines for +10-80".
             if cleared > 0:
                 self._combo += 1
                 line_rewards = {1: 10.0, 2: 30.0, 3: 50.0, 4: 80.0}
@@ -188,8 +189,11 @@ class TetrisEnv(gym.Env):
             else:
                 self._combo = 0
 
-            # Small reward for surviving (piece placed successfully)
-            reward += 0.1
+            # Height penalty: discourage stacking too high.
+            # Count occupied cells in the top 4 rows — penalize tall stacks.
+            top_cells = int(np.sum(self.board[:4] != 0))
+            if top_cells > 0:
+                reward -= top_cells * 0.05
 
             # Level up every 10 lines
             self._level = 1 + self._lines_cleared // 10

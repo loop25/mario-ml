@@ -41,7 +41,7 @@ class StreamManager:
         width: int = 1280,
         height: int = 720,
         fps: int = 30,
-        video_bitrate: str = '4500k',
+        video_bitrate: str = '6000k',
         audio_file: Optional[str] = None,
         audio_files: Optional[list] = None,
     ):
@@ -69,7 +69,7 @@ class StreamManager:
         self._frame_count = 0
         self._start_time = 0.0
         self._reconnect_attempts = 0
-        self._max_reconnect_attempts = 5
+        self._max_reconnect_attempts = 20  # Allow many reconnects for long streams
         self._reconnect_delay = 5  # seconds
         self._auto_reconnect = True
         self._last_frame: Optional[np.ndarray] = None
@@ -107,10 +107,14 @@ class StreamManager:
             cmd += ['-f', 'lavfi', '-i',
                     'anullsrc=channel_layout=stereo:sample_rate=44100']
 
-        # Video encoding
+        # Video encoding — optimized for game/pixel art streaming.
+        # 'faster' preset gives much better quality than 'veryfast' for
+        # crisp game pixels, at only ~15% more CPU. 'zerolatency' keeps
+        # latency low for live streaming. CBR mode (maxrate=bitrate)
+        # prevents YouTube/Twitch bitrate warnings.
         cmd += [
             '-c:v', 'libx264',
-            '-preset', 'veryfast',
+            '-preset', 'faster',
             '-tune', 'zerolatency',
             '-b:v', self.video_bitrate,
             '-maxrate', self.video_bitrate,
@@ -118,11 +122,12 @@ class StreamManager:
             '-pix_fmt', 'yuv420p',
             '-g', str(self.fps * 2),
             '-vsync', 'cfr',
+            '-x264-params', 'nal-hrd=cbr',  # Force CBR for stable bitrate
         ]
 
         # Audio encoding — do NOT use -shortest (it kills the stream
         # when audio buffer fills up faster than video frames arrive)
-        cmd += ['-c:a', 'aac', '-b:a', '128k', '-ar', '44100']
+        cmd += ['-c:a', 'aac', '-b:a', '192k', '-ar', '44100']
 
         # Build output destinations
         # When streaming to a single destination, use plain flv output.
