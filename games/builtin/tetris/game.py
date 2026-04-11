@@ -100,8 +100,8 @@ class TetrisEnv(gym.Env):
         self.render_size = render_size
         self.max_steps = max_steps
 
-        # 5 actions: left, right, rotate_cw, rotate_ccw, hard_drop
-        self.action_space = Discrete(5)
+        # 7 actions: left, right, rotate_cw, rotate_ccw, hard_drop, soft_drop, no-op
+        self.action_space = Discrete(7)
         self.observation_space = Box(
             low=0, high=255,
             shape=(render_size, render_size, 1),
@@ -143,6 +143,7 @@ class TetrisEnv(gym.Env):
 
         # Apply action to current piece
         hard_dropped = False
+        force_gravity = False
         if action == 0:    # Left
             self._try_move(0, -1)
         elif action == 1:  # Right
@@ -157,14 +158,18 @@ class TetrisEnv(gym.Env):
                 drop_rows += 1
             reward += drop_rows * 0.02  # Small reward for dropping
             hard_dropped = True
+        elif action == 5:  # Soft drop — force gravity this step
+            force_gravity = True
+        # action == 6: No-op — do nothing, let gravity handle it
 
         # Gravity: piece falls based on level speed.
-        # Higher levels = faster drops. Level 1: every 20 steps, Level 10+: every 2.
+        # Higher levels = faster drops. Level 1: every 10 steps, Level 10+: every 2.
         # Hard drops skip gravity and lock immediately.
+        # Soft drop forces gravity this step regardless of counter.
         if not hard_dropped:
-            gravity_interval = max(2, 22 - self._level * 2)
+            gravity_interval = max(2, 12 - self._level)
             self._gravity_counter += 1
-            if self._gravity_counter < gravity_interval:
+            if not force_gravity and self._gravity_counter < gravity_interval:
                 # No gravity this step — piece stays in place
                 if self._total_steps >= self.max_steps:
                     return self._render_obs(), 0.0, True, self._info()

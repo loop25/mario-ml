@@ -35,9 +35,9 @@ class TestTetrisEnv:
         assert 'level' in info
         env.close()
 
-    def test_action_space_is_5(self):
+    def test_action_space_is_7(self):
         env = TetrisEnv()
-        assert env.action_space.n == 5
+        assert env.action_space.n == 7  # left, right, rot_cw, rot_ccw, hard_drop, soft_drop, no-op
         env.close()
 
     def test_observation_space_shape(self):
@@ -152,8 +152,8 @@ class TestTetrisAdapter:
         adapter = TetrisAdapter()
         info = adapter.get_action_space_info()
         assert isinstance(info, ActionSpaceInfo)
-        assert info.num_actions == 5
-        assert len(info.action_labels) == 5
+        assert info.num_actions == 7
+        assert len(info.action_labels) == 7
 
     def test_observation_shape(self):
         adapter = TetrisAdapter()
