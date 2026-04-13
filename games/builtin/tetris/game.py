@@ -166,10 +166,8 @@ class TetrisEnv(gym.Env):
         elif action == 3:  # Rotate CCW
             self._try_rotate(-1)
         elif action == 4:  # Hard drop — instant landing, bypasses gravity
-            drop_rows = 0
             while self._try_move(1, 0):
-                drop_rows += 1
-            reward += drop_rows * 0.02  # Small reward for dropping
+                pass
             hard_dropped = True
         elif action == 5:  # Soft drop — force gravity this step
             force_gravity = True
@@ -214,36 +212,39 @@ class TetrisEnv(gym.Env):
             cleared = self._clear_lines()
             self._last_clear_count = cleared
 
-            # Scoring: line clears are the ONLY significant reward.
-            # Survival reward removed — it caused agents to learn "stack
-            # randomly for guaranteed +50" instead of "clear lines for +10-80".
+            # ── REWARD DESIGN (v4 — minimal, goal-aligned) ─────────
+            #
+            # After 3 iterations of "add shaping → agent exploits it":
+            #   v1: +0.1 survival → agent stacked randomly for +50
+            #   v2: +10/30/50/80 lines, -0.05 height → agent learned "die
+            #       early" because height penalty > game-over penalty
+            #   v3: removed height penalty → still too sparse at +10
+            #
+            # v4 principle: reward = normalized game score. Period.
+            # Line clears give +1.0 to +4.0 (1 per line cleared).
+            # Game over gives -1.0. Everything else is 0.
+            # This puts all rewards on the same scale and prevents any
+            # single signal from dominating.
+            #
             if cleared > 0:
                 self._combo += 1
-                line_rewards = {1: 10.0, 2: 30.0, 3: 50.0, 4: 80.0}
-                reward += line_rewards.get(cleared, cleared * 20.0)
-                reward += self._combo * 2.0  # Combo bonus
+                reward += float(cleared)  # +1.0 per line cleared
+                reward += self._combo * 0.1  # Small combo bonus
 
-                # T-spin bonus: doubled line clear reward
+                # T-spin bonus (subtle — doesn't dominate)
                 if self._check_tspin(locked_piece_type):
-                    tspin_bonus = {1: 20.0, 2: 60.0, 3: 100.0}
-                    reward += tspin_bonus.get(cleared, cleared * 30.0)
+                    reward += float(cleared) * 0.5  # 50% bonus for T-spin
                     self._last_was_tspin = True
             else:
                 self._combo = 0
-
-            # Height penalty: discourage stacking too high.
-            # Count occupied cells in the top 4 rows — penalize tall stacks.
-            top_cells = int(np.sum(self.board[:4] != 0))
-            if top_cells > 0:
-                reward -= top_cells * 0.05
 
             # Level up every 10 lines
             self._level = 1 + self._lines_cleared // 10
 
             # Spawn next piece
             if not self._spawn_piece():
-                # Game over — can't place new piece
-                return self._render_obs(), -2.0, True, self._info()
+                # Game over — same scale as line clears (-1.0)
+                return self._render_obs(), reward - 1.0, True, self._info()
 
         # Max steps limit
         if self._total_steps >= self.max_steps:

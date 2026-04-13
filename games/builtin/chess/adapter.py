@@ -66,16 +66,17 @@ class ChessAdapter(BaseGameAdapter):
         return ['ppo', 'dqn', 'a2c', 'rainbow', 'dt']
 
     def get_reward_config(self) -> RewardConfig:
-        # Board game: win/loss signals are +-1.0, so death penalty must stay
-        # proportional. A -2.0 penalty means losing costs 2x a win — enough
-        # to discourage losing without creating risk-aversion.
+        # Board game: game.py handles all win/loss rewards internally (±1.0).
+        # The wrapper must NOT add death_penalty or completion_bonus — that
+        # would make losses -3.0 and wins +6.0, creating asymmetry that
+        # teaches extreme risk-aversion instead of winning.
         return RewardConfig(
             time_penalty_per_second=0.0,
-            completion_bonus=5.0,
-            death_penalty=-2.0,
+            completion_bonus=0.0,
+            death_penalty=0.0,
             idle_penalty_per_second=0.0,
             speed_bonus_multiplier=0.0,
-            par_time_seconds=600.0,
+            par_time_seconds=0.0,
         )
 
     def get_training_hints(self) -> dict:

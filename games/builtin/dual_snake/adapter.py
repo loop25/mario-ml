@@ -66,13 +66,14 @@ class DualSnakeAdapter(BaseGameAdapter):
         )
 
     def get_reward_config(self) -> RewardConfig:
+        # Game handles all rewards internally (+1.0 food, -0.5 death).
         return RewardConfig(
-            time_penalty_per_second=0.001,
-            completion_bonus=100.0,
-            death_penalty=-2.0,
-            idle_penalty_per_second=0.001,
-            speed_bonus_multiplier=1.0,
-            par_time_seconds=120.0,
+            time_penalty_per_second=0.0,
+            completion_bonus=0.0,
+            death_penalty=0.0,
+            idle_penalty_per_second=0.0,
+            speed_bonus_multiplier=0.0,
+            par_time_seconds=0.0,
         )
 
     def get_training_hints(self) -> dict:

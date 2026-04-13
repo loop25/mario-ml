@@ -58,16 +58,16 @@ class TetrisAdapter(BaseGameAdapter):
         )
 
     def get_reward_config(self) -> RewardConfig:
-        # Tetris is a survival/puzzle game — surviving longer IS success.
-        # No time or idle penalties: the agent should be rewarded for lasting.
-        # Death penalty is mild so the line-clear signal dominates learning.
+        # All rewards are handled in game.py step() directly.
+        # The TimeRewardWrapper should NOT add any additional penalties —
+        # they interfere with the carefully balanced game reward signal.
         return RewardConfig(
-            time_penalty_per_second=0.0,     # No time penalty — survival is good
-            completion_bonus=100.0,
-            death_penalty=-2.0,              # Mild — matches game.py's own -2.0
-            idle_penalty_per_second=0.0,     # No idle penalty for puzzle games
-            speed_bonus_multiplier=0.5,
-            par_time_seconds=300.0,
+            time_penalty_per_second=0.0,
+            completion_bonus=0.0,   # Game handles its own rewards
+            death_penalty=0.0,      # Game handles -1.0 internally
+            idle_penalty_per_second=0.0,
+            speed_bonus_multiplier=0.0,
+            par_time_seconds=0.0,
         )
 
     def get_training_hints(self) -> dict:

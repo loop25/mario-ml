@@ -59,13 +59,14 @@ class TicTacToeAdapter(BaseGameAdapter):
         return ['ppo', 'dqn', 'a2c', 'rainbow', 'dt']
 
     def get_reward_config(self) -> RewardConfig:
+        # Game handles all win/loss rewards internally (±1.0).
         return RewardConfig(
             time_penalty_per_second=0.0,
-            completion_bonus=5.0,
-            death_penalty=-2.0,
+            completion_bonus=0.0,
+            death_penalty=0.0,
             idle_penalty_per_second=0.0,
             speed_bonus_multiplier=0.0,
-            par_time_seconds=60.0,
+            par_time_seconds=0.0,
         )
 
     def get_training_hints(self) -> dict:

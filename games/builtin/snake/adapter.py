@@ -58,15 +58,16 @@ class SnakeAdapter(BaseGameAdapter):
         )
 
     def get_reward_config(self) -> RewardConfig:
-        # Snake: food reward is +1.0, death is -1.0 intrinsically.
-        # Keep death penalty mild so food-seeking dominates learning.
+        # Snake: game.py handles food (+1.0), death (-1.0), and proximity
+        # (±0.005) internally. Wrapper should NOT add death/completion
+        # bonuses — they double-count and create asymmetry.
         return RewardConfig(
-            time_penalty_per_second=0.001,   # Very mild — encourage efficiency
-            completion_bonus=100.0,
-            death_penalty=-2.0,              # Mild — matches game's own -1.0 scale
-            idle_penalty_per_second=0.001,
-            speed_bonus_multiplier=1.0,
-            par_time_seconds=120.0,
+            time_penalty_per_second=0.0,
+            completion_bonus=0.0,
+            death_penalty=0.0,
+            idle_penalty_per_second=0.0,
+            speed_bonus_multiplier=0.0,
+            par_time_seconds=0.0,
         )
 
     def get_training_hints(self) -> dict:
